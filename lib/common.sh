@@ -12,6 +12,7 @@ KBLED_REMOTE_DIR="/data/local/tmp"
 kb_info() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 kb_ok()   { printf '\033[1;32m  ok\033[0m %s\n' "$*"; }
 kb_warn() { printf '\033[1;33mwarn\033[0m %s\n' "$*" >&2; }
+kb_err()  { printf '\033[1;31merr \033[0m %s\n' "$*" >&2; }
 kb_die()  { printf '\033[1;31merr \033[0m %s\n' "$*" >&2; exit 1; }
 
 kb_have() { command -v "$1" >/dev/null 2>&1; }
@@ -99,8 +100,21 @@ kb_decode_parcel() {
   '
 }
 
-# Read a vendor key: echo its string value (empty on failure).
+# Vendor keys this tool may touch. Anything else is refused before it can
+# reach an adb shell command line.
+KBLED_KNOWN_KEYS="keyboard_brightness_timeout keyboard_brightness_timeout_backup keyboard_led_brightness"
+
+# True when $1 is one of the vendor keys above.
+kb_is_known_key() {
+  case " $KBLED_KNOWN_KEYS " in
+    *" $1 "*) return 0 ;;
+  esac
+  return 1
+}
+
+# Read a vendor key: echo its value (empty on failure).
 kb_read_key() {
+  kb_is_known_key "$1" || kb_die "refusing to read unknown key '$1'"
   { kb_shell "service call agui_common 3 s16 $1 s16 -1" 2>/dev/null || true; } | kb_decode_parcel
 }
 
@@ -113,6 +127,10 @@ kb_read_led() {
 # Write a vendor key and verify the read-back.
 kb_write_key() {
   local key=$1 val=$2 got
+  kb_is_known_key "$key" || kb_die "refusing to write unknown key '$key'"
+  case "$val" in
+    '' | *[!0-9]*) kb_die "refusing to write a non-numeric value for $key: '$val'" ;;
+  esac
   kb_shell "service call agui_common 4 s16 $key s16 $val" >/dev/null 2>&1
   got=$(kb_read_key "$key")
   [ "$got" = "$val" ] \
@@ -176,4 +194,63 @@ kb_save_backup() {
     printf 'KBLED_BRIGHTNESS=%q\n' "$(kb_read_key keyboard_led_brightness)"
   } >"$bf"
   chmod 600 "$bf"
+}
+
+# Parse a backup file into KBLED_BK_* variables. The file is read as plain
+# data: nothing in it is ever evaluated or sourced. Returns non-zero (with a
+# message on stderr) on anything that is not a known KEY=VALUE pair with a
+# safe value, so a tampered backup can neither run host commands nor inject
+# into the phone shell command line.
+# parse is a data-only parser; the KBLED_BK_* variables it sets are read by
+# the callers in ./kbled, which shellcheck cannot see from here.
+# shellcheck disable=SC2034
+kb_backup_load() {
+  local file=$1 line key val
+  KBLED_BK_DEVICE=""
+  KBLED_BK_TIMEOUT=""
+  KBLED_BK_BACKUP=""
+  KBLED_BK_BRIGHTNESS=""
+
+  [ -f "$file" ] || { kb_err "backup: $file does not exist"; return 1; }
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      '' | '#'*) continue ;;
+    esac
+    case "$line" in
+      *=*) key=${line%%=*}; val=${line#*=} ;;
+      *) kb_err "backup: not a KEY=VALUE line in $file: $line"; return 1 ;;
+    esac
+    case "$key" in
+      KBLED_DEVICE | KBLED_TIMEOUT | KBLED_BACKUP | KBLED_BRIGHTNESS) : ;;
+      *) kb_err "backup: unknown key '$key' in $file"; return 1 ;;
+    esac
+    # v1.0.0 wrote values with printf %q, which renders an empty value as ''.
+    if [ "$val" = "''" ]; then
+      val=""
+    fi
+    case "$key" in
+      KBLED_DEVICE)
+        case "$val" in
+          *[!A-Za-z0-9._:-]*) kb_err "backup: invalid device serial in $file"; return 1 ;;
+        esac
+        KBLED_BK_DEVICE=$val
+        ;;
+      *)
+        # An empty value means "was not recorded" (a v1.0.0 backup written
+        # while the read failed); the caller falls back to the tool default.
+        # Every non-empty value must be plain digits.
+        case "$val" in
+          *[!0-9]*) kb_err "backup: $key must be a number (got '$val') in $file"; return 1 ;;
+        esac
+        case "$key" in
+          KBLED_TIMEOUT) KBLED_BK_TIMEOUT=$val ;;
+          KBLED_BACKUP) KBLED_BK_BACKUP=$val ;;
+          KBLED_BRIGHTNESS) KBLED_BK_BRIGHTNESS=$val ;;
+        esac
+        ;;
+    esac
+  done <"$file"
+
+  return 0
 }
