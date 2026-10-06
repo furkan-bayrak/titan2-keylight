@@ -17,6 +17,23 @@
 KBLED_PIDFILE=${KBLED_PIDFILE:-/data/local/tmp/kbled_watch.pid}
 KBLED_INTERVAL=${KBLED_INTERVAL:-2}
 
+# Refuse to run twice: if the pidfile points at a live watcher, exit instead
+# of starting a second poller. Covers a direct run of this script next to an
+# already running watcher.
+if [ -f "$KBLED_PIDFILE" ]; then
+  oldpid=$(cat "$KBLED_PIDFILE" 2>/dev/null)
+  case "$oldpid" in
+    '' | *[!0-9]*) : ;;
+    *)
+      if [ "$oldpid" -ne "$$" ] && kill -0 "$oldpid" 2>/dev/null &&
+        tr '\0' '\n' < "/proc/$oldpid/cmdline" 2>/dev/null | grep -q kbled_watch; then
+        echo "kbled watcher already running (pid $oldpid)" >&2
+        exit 0
+      fi
+      ;;
+  esac
+fi
+
 echo $$ > "$KBLED_PIDFILE"
 trap 'rm -f "$KBLED_PIDFILE"' EXIT
 

@@ -172,11 +172,17 @@ kb_push_scripts() {
   kb_shell "chmod 755 $KBLED_REMOTE_DIR/kbled_watch.sh $KBLED_REMOTE_DIR/kbled_start.sh $KBLED_REMOTE_DIR/kbled_stop.sh"
 }
 
-# Watcher PID, or empty if not running.
+# Watcher PID, or empty if not running. The pid must be numeric and the
+# process must really be kbled_watch: a stale pidfile after a reboot, or a
+# recycled pid, must never be reported as the watcher.
 kb_watcher_pid() {
-  local pid
-  pid=$(kb_shell "cat $KBLED_REMOTE_DIR/kbled_watch.pid 2>/dev/null" | tr -d '\r' || true)
-  if [ -n "$pid" ] && kb_shell "kill -0 $pid 2>/dev/null" >/dev/null 2>&1; then
+  local pid probe
+  pid=$(kb_shell "cat $KBLED_REMOTE_DIR/kbled_watch.pid 2>/dev/null" | tr -d '\r\n' || true)
+  case "$pid" in
+    '' | *[!0-9]*) return 0 ;;
+  esac
+  probe="kill -0 $pid 2>/dev/null && tr '\\0' '\\n' < /proc/$pid/cmdline 2>/dev/null | grep -q kbled_watch"
+  if kb_shell "$probe" >/dev/null 2>&1; then
     printf '%s' "$pid"
   fi
 }

@@ -3,9 +3,17 @@
 
 PIDFILE=${KBLED_PIDFILE:-/data/local/tmp/kbled_watch.pid}
 
+# True when $1 is a live process whose command line is the kbled watcher.
+# Never kills a pid that was recycled by an unrelated process.
+is_watcher() {
+  case "$1" in '' | *[!0-9]*) return 1 ;; esac
+  kill -0 "$1" 2>/dev/null || return 1
+  tr '\0' '\n' < "/proc/$1/cmdline" 2>/dev/null | grep -q kbled_watch
+}
+
 if [ -f "$PIDFILE" ]; then
   pid=$(cat "$PIDFILE" 2>/dev/null)
-  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+  if is_watcher "$pid"; then
     kill "$pid" 2>/dev/null
     rm -f "$PIDFILE"
     echo "kbled watcher stopped (pid $pid)"
