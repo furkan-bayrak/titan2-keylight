@@ -108,7 +108,7 @@ All commands, run from the cloned folder:
 
 ## After a reboot
 
-The timeout setting is stored on the phone, so the always-on backlight survives a reboot. The watcher does not start by itself, because starting it automatically would need root or a boot app. After a reboot, run:
+The timeout setting is stored on the phone, so the always-on backlight survives a reboot. The watcher does not start by itself, because starting it automatically would need root. After a reboot, run:
 
 ```bash
 ./kbled start
@@ -116,7 +116,7 @@ The timeout setting is stored on the phone, so the always-on backlight survives 
 
 Without the watcher, the always-on part still works. Only the tile's instant "off" is lost; the light would then go off at the next screen off/on cycle.
 
-To make this automatic without root, install [Termux:Boot](https://f-droid.org/packages/com.termux.boot/) and have it run `kbled start`, or simply run the command the next time you plug the phone in.
+There is no supported way to start the watcher automatically without root: `kbled` is the computer-side program, so it cannot run on the phone by itself. Run `./kbled start` from the computer again after a reboot, for example the next time you plug the phone in.
 
 ## Troubleshooting
 

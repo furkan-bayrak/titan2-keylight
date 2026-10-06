@@ -148,8 +148,9 @@ command (`cmd ...` says "No shell command implementation"):
 
 The store values persist in `/data/system`, so the always-on behaviour survives a
 reboot. The watcher is a normal process and does not, so run `./kbled start`
-after rebooting. Automating that without root requires a boot app such as
-Termux:Boot.
+from the computer after each reboot. There is no supported way to start the
+watcher automatically without root (`kbled` is the computer-side client, so it
+cannot run on the phone by itself).
 
 ## 7. Re-deriving transaction codes
 
