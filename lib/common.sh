@@ -175,9 +175,42 @@ kb_push_scripts() {
 # Watcher PID, or empty if not running.
 kb_watcher_pid() {
   local pid
-  pid=$(kb_shell "cat $KBLED_REMOTE_DIR/kbled_watch.pid 2>/dev/null" | tr -d '\r')
+  pid=$(kb_shell "cat $KBLED_REMOTE_DIR/kbled_watch.pid 2>/dev/null" | tr -d '\r' || true)
   if [ -n "$pid" ] && kb_shell "kill -0 $pid 2>/dev/null" >/dev/null 2>&1; then
     printf '%s' "$pid"
+  fi
+}
+
+# Stop the watcher on the device and always report the outcome. Uses the
+# pushed stop script when it is there, and falls back to killing the pidfile
+# pid when the script is missing or fails, so a stop can never silently leave
+# a live watcher behind.
+kb_stop_watcher() {
+  local pid stopped=0
+
+  if ! kb_shell "[ -x $KBLED_REMOTE_DIR/kbled_stop.sh ]" >/dev/null 2>&1; then
+    kb_warn "the on-device stop script is missing; falling back to the pidfile"
+  elif kb_shell "$KBLED_REMOTE_DIR/kbled_stop.sh"; then
+    stopped=1
+  else
+    kb_warn "the on-device stop script failed; falling back to the pidfile"
+  fi
+
+  if [ "$stopped" -eq 1 ]; then
+    return 0
+  fi
+
+  pid=$(kb_watcher_pid)
+  if [ -z "$pid" ]; then
+    kb_ok "no watcher running"
+    return 0
+  fi
+
+  if kb_shell "kill $pid 2>/dev/null" >/dev/null 2>&1; then
+    kb_shell "rm -f $KBLED_REMOTE_DIR/kbled_watch.pid" >/dev/null 2>&1 || true
+    kb_ok "watcher stopped (pid $pid)"
+  else
+    kb_warn "could not stop the watcher (pid $pid); it may still be running"
   fi
 }
 

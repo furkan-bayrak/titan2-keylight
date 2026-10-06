@@ -123,18 +123,23 @@ do_uninstall() {
   kb_require_tools
   kb_find_device
 
-  if kb_shell "[ -x $KBLED_REMOTE_DIR/kbled_stop.sh ]" >/dev/null 2>&1; then
-    kb_shell "$KBLED_REMOTE_DIR/kbled_stop.sh" || true
-  fi
-
-  local bf
+  local bf have_backup=0 tmo="$KBLED_DEFAULT_TIMEOUT" bak="$KBLED_DEFAULT_TIMEOUT" br=""
   bf=$(kb_backup_file)
   if [ -f "$bf" ]; then
     kb_backup_load "$bf" || kb_die "refusing to restore from an invalid backup file: $bf"
-    kb_write_key keyboard_brightness_timeout "${KBLED_BK_TIMEOUT:-$KBLED_DEFAULT_TIMEOUT}"
-    kb_write_key keyboard_brightness_timeout_backup "${KBLED_BK_BACKUP:-$KBLED_DEFAULT_TIMEOUT}"
-    if [ -n "${KBLED_BK_BRIGHTNESS:-}" ]; then
-      kb_write_key keyboard_led_brightness "$KBLED_BK_BRIGHTNESS"
+    have_backup=1
+    tmo=${KBLED_BK_TIMEOUT:-$KBLED_DEFAULT_TIMEOUT}
+    bak=${KBLED_BK_BACKUP:-$KBLED_DEFAULT_TIMEOUT}
+    br=${KBLED_BK_BRIGHTNESS:-}
+  fi
+
+  kb_stop_watcher
+
+  if [ "$have_backup" -eq 1 ]; then
+    kb_write_key keyboard_brightness_timeout "$tmo"
+    kb_write_key keyboard_brightness_timeout_backup "$bak"
+    if [ -n "$br" ]; then
+      kb_write_key keyboard_led_brightness "$br"
     fi
     kb_ok "restored original settings from $bf"
   else
@@ -178,7 +183,7 @@ do_start() {
 do_stop() {
   kb_require_tools
   kb_find_device
-  kb_shell "$KBLED_REMOTE_DIR/kbled_stop.sh"
+  kb_stop_watcher
 }
 
 do_doctor() {
