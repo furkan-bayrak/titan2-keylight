@@ -9,6 +9,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - A dependency-free test suite (`tests/run.sh`) with a fake `adb`: it covers the
   argument matrix, the install/uninstall round trip, backup-file injection
   attempts, parcel decoding and the on-device watcher parser.
+- Test coverage for the recycled-pid guard on both sides of the wire: a live pid
+  whose command line is not the watcher is neither reported as running nor
+  killed, and the device-side `is_watcher` check is exercised against real
+  processes.
 
 ### Changed
 - CI: `ludeeus/action-shellcheck` is pinned to a release commit instead of a

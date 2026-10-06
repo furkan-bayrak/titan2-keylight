@@ -6,7 +6,10 @@
 #   key_<name>              a stored vendor key value (raw string)
 #   led                     the raw LED value reported by the service
 #   dev/<name>              a file that exists on the fake device
-#   watcher_live            present while the pidfile pid is a live watcher
+#   watcher_live            present while the pidfile pid is a live process
+#   watcher_cmdline         the command line of that live pid (NUL separated);
+#                           defaults to a kbled_watch command line, so a test
+#                           can model a pid that was recycled by another app
 #   verify_fail             present once a write happened (mode=verify-fail)
 #
 # Modes ($FAKE_ADB_MODE):
@@ -157,6 +160,15 @@ case "${1:-}" in
         if [ "$pid" != "$(cat "$STATE/dev/kbled_watch.pid" 2>/dev/null)" ]; then
           exit 1
         fi
+        # The real probe also greps the process command line: a live pid is
+        # only the watcher when its cmdline says so.
+        case "$cmd" in
+          *"grep -q kbled_watch"*)
+            if [ -f "$STATE/watcher_cmdline" ]; then
+              tr '\0' '\n' <"$STATE/watcher_cmdline" | grep -q kbled_watch || exit 1
+            fi
+            ;;
+        esac
         ;;
       "kill "*)
         pid=${cmd#kill }

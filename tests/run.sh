@@ -531,6 +531,106 @@ EOF
   expect_eq "$OUT" "on"
 }
 
+case_device_is_watcher() {
+  local is_watcher watcher_pid other_pid dead_pid n
+
+  if [ ! -r "/proc/$$/cmdline" ]; then
+    printf 'skipped: this host has no /proc\n'
+    return 0
+  fi
+
+  # The device scripts use the same liveness + cmdline check as the host. Run
+  # their is_watcher() against real local processes: a pid only counts as the
+  # watcher when its command line says so.
+  is_watcher=$(awk '/^is_watcher\(\) \{/,/^\}/' "$ROOT/device/kbled_stop.sh")
+  expect_contains "$is_watcher" "/proc/"
+  expect_contains "$is_watcher" "grep -q kbled_watch"
+
+  cat >"$CASE_DIR/kbled_watch.sh" <<'EOF'
+#!/bin/sh
+n=0
+while [ "$n" -lt 30 ]; do
+  sleep 1
+  n=$((n + 1))
+done
+EOF
+  cat >"$CASE_DIR/other_process.sh" <<'EOF'
+#!/bin/sh
+n=0
+while [ "$n" -lt 30 ]; do
+  sleep 1
+  n=$((n + 1))
+done
+EOF
+  chmod 755 "$CASE_DIR/kbled_watch.sh" "$CASE_DIR/other_process.sh"
+
+  sh "$CASE_DIR/kbled_watch.sh" &
+  watcher_pid=$!
+  sh "$CASE_DIR/other_process.sh" &
+  other_pid=$!
+  sh -c 'exit 0' &
+  dead_pid=$!
+  wait "$dead_pid" 2>/dev/null || true
+
+  # Wait for the stand-in watcher's cmdline to become visible in /proc.
+  n=0
+  while [ "$n" -lt 50 ] && ! tr '\0' '\n' <"/proc/$watcher_pid/cmdline" 2>/dev/null | grep -q kbled_watch; do
+    sleep 0.05
+    n=$((n + 1))
+  done
+
+  RC=0
+  OUT=$(sh -c "$is_watcher
+    check() {
+      if is_watcher \"\$1\"; then printf '%s=yes\\n' \"\$1\"; else printf '%s=no\\n' \"\$1\"; fi
+    }
+    check $watcher_pid
+    check $other_pid
+    check $dead_pid
+    check 999999999
+    check 12x
+    check ''" 2>&1) || RC=$?
+
+  kill "$watcher_pid" "$other_pid" 2>/dev/null || true
+  wait "$watcher_pid" "$other_pid" 2>/dev/null || true
+
+  expect_rc 0 "$RC"
+  expect_contains "$OUT" "$watcher_pid=yes"
+  expect_contains "$OUT" "$other_pid=no"
+  expect_contains "$OUT" "$dead_pid=no"
+  expect_contains "$OUT" "999999999=no"
+  expect_contains "$OUT" "12x=no"
+  expect_contains "$OUT" "=no"
+}
+
+case_recycled_pid_guard() {
+  seed_device
+  local bf
+  bf="$FAKE_ADB_STATE/dev/kbled_watch.pid"
+
+  # The pidfile pid is alive, but its command line belongs to another process:
+  # a recycled pid must never be reported as the watcher, and must never be
+  # killed.
+  printf '4242\n' >"$bf"
+  : >"$FAKE_ADB_STATE/watcher_live"
+  printf '/system/bin/sh\0/data/local/tmp/other_script.sh\0' >"$FAKE_ADB_STATE/watcher_cmdline"
+
+  run_kbled status --serial FAKESERIAL
+  expect_rc 0 "$RC"
+  expect_contains "$OUT" "$(printf '%-36s %s' watcher 'not running')"
+
+  run_kbled stop --serial FAKESERIAL
+  expect_rc 0 "$RC"
+  expect_contains "$OUT" "no watcher running"
+  expect_eq "$(count_matches "$FAKE_ADB_LOG" 'kill 4242')" "0"
+
+  # The same live pid is the watcher once its cmdline says so.
+  printf '/system/bin/sh\0/data/local/tmp/kbled_watch.sh\0' >"$FAKE_ADB_STATE/watcher_cmdline"
+  run_kbled status --serial FAKESERIAL
+  expect_rc 0 "$RC"
+  expect_contains "$OUT" "$(printf '%-36s %s' watcher 'running (pid 4242)')"
+}
+
 case_watcher_status_and_stop() {
   seed_device
   run_kbled install --serial FAKESERIAL
@@ -718,6 +818,8 @@ for c in \
   case_legacy_and_missing_backup \
   case_parcel_decoder \
   case_device_is_off_parser \
+  case_device_is_watcher \
+  case_recycled_pid_guard \
   case_watcher_status_and_stop \
   case_device_output_sanitised \
   case_error_reporting \
