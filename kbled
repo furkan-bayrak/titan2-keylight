@@ -143,12 +143,22 @@ parse_args() {
     kb_option_applies "$ACTION" force || kb_usage_die "--force is not valid for '$ACTION' (it only affects install)"
   fi
 
-  case "$TIMEOUT_MS" in
-    '' | *[!0-9]*) kb_die "--timeout-ms must be a positive integer" ;;
-  esac
+  if ! kb_int_in_range "$TIMEOUT_MS" 1 "$KBLED_BIG_TIMEOUT"; then
+    kb_usage_die "--timeout-ms must be between 1 and $KBLED_BIG_TIMEOUT"
+  fi
   if [ -n "$BRIGHTNESS" ]; then
-    case "$BRIGHTNESS" in '' | *[!0-9]*) kb_die "--brightness must be 0-100" ;; esac
-    [ "$BRIGHTNESS" -le 100 ] || kb_die "--brightness must be 0-100"
+    kb_int_in_range "$BRIGHTNESS" 0 100 || kb_usage_die "--brightness must be between 0 and 100"
+  fi
+  if [ -n "${KBLED_SERIAL:-}" ]; then
+    kb_valid_serial "$KBLED_SERIAL" \
+      || kb_usage_die "--serial may only contain letters, digits, '.', '_', '-' and ':'"
+  fi
+
+  # Normalise (007 -> 7) so the value read back from the device matches the
+  # value that was written.
+  TIMEOUT_MS=$(kb_decimal "$TIMEOUT_MS")
+  if [ -n "$BRIGHTNESS" ]; then
+    BRIGHTNESS=$(kb_decimal "$BRIGHTNESS")
   fi
 }
 

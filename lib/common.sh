@@ -63,6 +63,8 @@ kb_find_device() {
   fi
 
   KBLED_SERIAL="$devices"
+  kb_valid_serial "$KBLED_SERIAL" \
+    || kb_die "unexpected characters in the adb serial reported by adb: '$KBLED_SERIAL'"
   kb_ok "device: $KBLED_SERIAL"
 }
 
@@ -228,9 +230,53 @@ kb_stop_watcher() {
 }
 
 # Path of the per-device backup file.
+# adb serials are USB serial numbers or host:port pairs for wireless adb.
+# Nothing else is allowed: the serial is interpolated into adb command lines
+# and used as part of the backup file name.
+kb_valid_serial() {
+  case "$1" in
+    '' | *[!A-Za-z0-9._:-]*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+# Echo a decimal integer without leading zeros (0 for all-zero input).
+kb_decimal() {
+  local v=$1
+  while [ -n "$v" ]; do
+    case "$v" in
+      0*) v=${v#0} ;;
+      *) break ;;
+    esac
+  done
+  printf '%s' "${v:-0}"
+}
+
+# True when $1 is a decimal integer inside $2..$3. Leading zeros are allowed.
+# The value is length capped before any arithmetic so that absurd input cannot
+# overflow the shell's integer arithmetic.
+kb_int_in_range() {
+  local v
+  case "$1" in '' | *[!0-9]*) return 1 ;; esac
+  v=$(kb_decimal "$1")
+  [ "${#v}" -le 10 ] || return 1
+  [ "$v" -ge "$2" ] && [ "$v" -le "$3" ]
+}
+
 kb_backup_file() {
   local safe
+  kb_valid_serial "${KBLED_SERIAL:-}" || kb_die "refusing to use '${KBLED_SERIAL:-}' as an adb serial"
+  # v1.0.0 mapped ':', '.' and ' ' to '_' (wireless serials look like
+  # 192.168.1.5:5555); keep the same names so existing backups are found.
   safe=$(printf '%s' "$KBLED_SERIAL" | tr ':. ' '___')
+  case "$safe" in
+    '' | . | .. | .*) kb_die "refusing to use '${KBLED_SERIAL:-}' as a backup file name" ;;
+  esac
+  # Defence in depth: the mapping above should already have removed every
+  # character outside this set.
+  case "$safe" in
+    *[!A-Za-z0-9._-]*) kb_die "refusing to use '${KBLED_SERIAL:-}' as a backup file name" ;;
+  esac
   printf '%s/kbled/backup-%s.env\n' "${XDG_CONFIG_HOME:-$HOME/.config}" "$safe"
 }
 
@@ -329,6 +375,10 @@ kb_backup_load() {
         case "$val" in
           *[!0-9]*) kb_err "backup: $key must be a number (got '$val') in $file"; return 1 ;;
         esac
+        if [ "${#val}" -gt 10 ]; then
+          kb_err "backup: $key is out of range in $file"
+          return 1
+        fi
         case "$key" in
           KBLED_TIMEOUT) KBLED_BK_TIMEOUT=$val ;;
           KBLED_BACKUP) KBLED_BK_BACKUP=$val ;;
