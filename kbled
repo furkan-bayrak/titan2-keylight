@@ -262,7 +262,7 @@ do_status() {
   for key in keyboard_brightness_timeout keyboard_brightness_timeout_backup \
     keyboard_led_brightness keyboard_led_auto_switch; do
     if val=$(kb_read_key "$key"); then
-      printf '%-36s %s\n' "$key" "$(kb_strip_controls "$val")"
+      printf '%-36s %s\n' "$key" "$(kb_display_text "$val")"
     else
       printf '%-36s %s\n' "$key" "unavailable (read failed)"
     fi
@@ -276,7 +276,7 @@ do_status() {
   fi
 
   if led=$(kb_read_led); then
-    printf '%-36s %s\n' "led" "$(kb_strip_controls "${led:-?}")"
+    printf '%-36s %s\n' "led" "$(kb_display_text "${led:-?}")"
   else
     printf '%-36s %s\n' "led" "unavailable (read failed)"
   fi

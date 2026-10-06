@@ -58,7 +58,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   or blaming the firmware; `status` prints `unavailable (read failed)`.
 - Device-controlled text (vendor values, `getprop` output and the `adb` output
   echoed in failure messages) is stripped of control bytes before it is printed,
-  so a hostile phone cannot inject terminal escape sequences.
+  so a hostile phone cannot inject terminal escape sequences. TAB, LF and CR
+  are neutralised to spaces as well - including in the two places that still
+  printed an `adb`-reported serial raw, the multi-device list and the
+  invalid-serial error - so a device value cannot spoof an extra line or column
+  either.
 - A second command, an unknown option, a missing option value or an option that
   does not apply to the chosen command now exits with code 2. An explicitly
   empty `--serial` counts as a mistake and exits 2 as well, while an empty

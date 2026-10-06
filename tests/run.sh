@@ -102,6 +102,24 @@ assert_no_esc() { # text
   esac
 }
 
+# Fail when device-derived text reached the terminal with a raw CR or TAB.
+# LF is a legitimate line separator in the tool's own output, so a device
+# value carrying one is caught by asserting the neutralised value instead.
+assert_no_raw_ws_controls() { # text
+  local text
+  text=$(printf '%s' "$1" | strip_ansi)
+  case "$text" in
+    *"$(printf '\t')"*)
+      printf 'a raw TAB byte from the device reached the terminal\n'
+      return 1
+      ;;
+    *"$(printf '\r')"*)
+      printf 'a raw CR byte from the device reached the terminal\n'
+      return 1
+      ;;
+  esac
+}
+
 # Run the device-side parser or another snippet from lib/common.sh in a plain
 # shell: run_sh <script>
 run_sh() { # script
@@ -806,6 +824,7 @@ case_watcher_status_and_stop() {
 
 case_device_output_sanitised() {
   seed_device
+  local neutralised
   export FAKE_ADB_MODE=control-chars
 
   # status prints decoded device values; one of them carries an ESC byte.
@@ -837,6 +856,42 @@ case_device_output_sanitised() {
   run_kbled_raw install --serial FAKESERIAL --force
   expect_rc 1 "$RC"
   assert_no_esc "$OUT"
+
+  # TAB, LF and CR from a device value must not be able to spoof an extra line
+  # or column either: all three are neutralised before display, so the value
+  # stays on one line.
+  export FAKE_ADB_MODE=ws-chars
+  run_kbled_raw status --serial FAKESERIAL
+  expect_rc 0 "$RC"
+  assert_no_esc "$OUT"
+  assert_no_raw_ws_controls "$OUT"
+  neutralised=$(printf '%s' "$OUT" | grep -c 'A B C D' || true)
+  expect_eq "$neutralised" "5"
+
+  # doctor quotes the offending value in its "not a number" error.
+  run_kbled_raw doctor --serial FAKESERIAL
+  expect_rc 1 "$RC"
+  assert_no_raw_ws_controls "$OUT"
+  expect_contains "$OUT" "got 'A B C D'"
+
+  # The multi-device list prints the serials adb reported, and the
+  # invalid-serial error echoes the serial it rejected: a rogue USB device must
+  # not be able to smuggle a control byte in through either.
+  export FAKE_ADB_MODE=multi-device
+  run_kbled_raw status
+  expect_rc 1 "$RC"
+  assert_no_esc "$OUT"
+  assert_no_raw_ws_controls "$OUT"
+  expect_contains "$OUT" "multiple adb devices are connected"
+  expect_contains "$OUT" "BADSERIAL"
+
+  export FAKE_ADB_MODE=bad-serial
+  run_kbled_raw status
+  expect_rc 1 "$RC"
+  assert_no_esc "$OUT"
+  assert_no_raw_ws_controls "$OUT"
+  expect_contains "$OUT" "unexpected characters in the adb serial"
+  expect_contains "$OUT" "BADSERIAL"
 }
 
 case_error_reporting() {

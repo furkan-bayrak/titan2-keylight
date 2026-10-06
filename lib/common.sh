@@ -25,19 +25,28 @@ kb_usage_die() {
 kb_have() { command -v "$1" >/dev/null 2>&1; }
 
 # Strip control bytes (NUL-BS, VT, FF, SO-US, DEL) from device-controlled text
-# before it is printed: escape sequences from a hostile or broken phone must
-# not reach the operator's terminal. Only ever applied to strings that are
-# displayed; values that are parsed or compared are never passed through this.
+# and neutralise the whitespace controls TAB, LF and CR before it is printed:
+# neither escape sequences nor line/column spoofing from a hostile or broken
+# phone may reach the operator's terminal. Only ever applied to strings that
+# are displayed; values that are parsed or compared are never passed through
+# this.
 kb_strip_controls() {
-  printf '%s' "$1" | tr -d '\000-\010\013\014\016-\037\177'
+  printf '%s' "$1" | tr -d '\000-\010\013\014\016-\037\177' | tr '\011\012\015' '   '
 }
 
-# One line of device-controlled text for an error message: control bytes
-# stripped, newlines collapsed, length capped.
-kb_error_text() {
+# One line of device-controlled text for display: control bytes stripped,
+# whitespace controls neutralised and the blanks around the value trimmed.
+kb_display_text() {
   local text
   text=$(kb_strip_controls "$1")
-  printf '%s' "$text" | tr '\n' ' ' | cut -c1-160
+  text=${text#"${text%%[![:space:]]*}"}
+  text=${text%"${text##*[![:space:]]}"}
+  printf '%s' "$text"
+}
+
+# One line of device-controlled text for an error message, length capped.
+kb_error_text() {
+  kb_display_text "$1" | cut -c1-160
 }
 
 kb_require_tools() {
@@ -65,7 +74,7 @@ kb_find_device() {
     return 0
   fi
 
-  local devices count
+  local devices count device
   devices=$(adb devices | awk 'NR > 1 && $2 == "device" { print $1 }')
   count=$(printf '%s\n' "$devices" | grep -c . || true)
 
@@ -74,13 +83,19 @@ kb_find_device() {
   fi
   if [ "$count" -gt 1 ]; then
     kb_warn "multiple adb devices are connected:"
-    printf '     %s\n' "$devices" >&2
+    # The serials are whatever adb reported, so they are sanitised per line
+    # before they are printed (and the line structure is kept).
+    while IFS= read -r device; do
+      printf '     %s\n' "$(kb_display_text "$device")" >&2
+    done <<EOF
+$devices
+EOF
     kb_die "select one with --serial <serial>, or set KBLED_SERIAL"
   fi
 
   KBLED_SERIAL="$devices"
   kb_valid_serial "$KBLED_SERIAL" \
-    || kb_die "unexpected characters in the adb serial reported by adb: '$KBLED_SERIAL'"
+    || kb_die "unexpected characters in the adb serial reported by adb: '$(kb_error_text "$KBLED_SERIAL")'"
   kb_ok "device: $KBLED_SERIAL"
 }
 
@@ -186,7 +201,7 @@ kb_write_key() {
     kb_die "could not read $key back to verify the write; the phone or the agui_common service did not answer"
   fi
   [ "$got" = "$val" ] \
-    || kb_die "write verification failed for $key: got '$(kb_strip_controls "$got")', expected '$val'. Your firmware may be unsupported."
+    || kb_die "write verification failed for $key: got '$(kb_display_text "$got")', expected '$val'. Your firmware may be unsupported."
 }
 
 # Pre-flight checks: vendor service present and the key readable/numeric.
@@ -210,15 +225,15 @@ kb_doctor() {
   if ! release=$(kb_shell getprop ro.build.version.release 2>&1); then
     kb_die "could not read ro.build.version.release from the phone (adb did not answer)${release:+: $(kb_error_text "$release")}"
   fi
-  model=$(kb_strip_controls "$model" | tr -d '\r\n')
-  release=$(kb_strip_controls "$release" | tr -d '\r\n')
+  model=$(kb_display_text "$model")
+  release=$(kb_display_text "$release")
   kb_ok "device: ${model:-unknown} (Android ${release:-?})"
 
   if ! t=$(kb_read_key keyboard_brightness_timeout); then
     kb_die "the phone did not answer a read of keyboard_brightness_timeout; check the connection and try again"
   fi
   case "$t" in
-    '' | *[!0-9]*) kb_die "keyboard_brightness_timeout is not a number (got '$(kb_strip_controls "$t")'); this firmware may be unsupported" ;;
+    '' | *[!0-9]*) kb_die "keyboard_brightness_timeout is not a number (got '$(kb_display_text "$t")'); this firmware may be unsupported" ;;
     *) kb_ok "keyboard_brightness_timeout = $t" ;;
   esac
 }

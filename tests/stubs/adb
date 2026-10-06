@@ -21,6 +21,10 @@
 #   push-fail       kb_adb push fails
 #   control-chars   key and LED reads answer with a value that contains an ESC
 #                   byte, the way a hostile phone could
+#   ws-chars        key and LED reads answer with "A<TAB>B<LF>C<CR>D"
+#   multi-device    'adb devices' lists a good serial and a serial carrying an
+#                   ESC byte and a CR
+#   bad-serial      'adb devices' lists only that hostile serial
 #   getprop-chars   getprop answers contain an ESC byte
 #   service-list-fail  'service list' fails
 #   getprop-fail    every getprop call fails
@@ -60,11 +64,25 @@ parcel_with_esc() {
   printf 'Result: Parcel(  00000000 00000003 001b0041 00000042  \047....\047)\n'
 }
 
+# A parcel whose decoded value is "A<TAB>B<LF>C<CR>D": the whitespace controls
+# are what the display paths under test have to neutralise.
+parcel_with_ws() {
+  printf 'Result: Parcel(  00000000 00000007 00090041 000a0042 000d0043 00000044  \047....\047)\n'
+}
+
 case "${1:-}" in
   get-state)
     ;;
   devices)
-    printf 'List of devices attached\nFAKESERIAL\tdevice\n'
+    if [ "$MODE" = multi-device ]; then
+      # The second serial carries an ESC byte and a CR: neither may reach the
+      # operator's terminal.
+      printf 'List of devices attached\nGOODSERIAL\tdevice\nBAD\033SERIAL\r\tdevice\n'
+    elif [ "$MODE" = bad-serial ]; then
+      printf 'List of devices attached\nBAD\033SERIAL\r\tdevice\n'
+    else
+      printf 'List of devices attached\nFAKESERIAL\tdevice\n'
+    fi
     ;;
   push)
     if [ "$MODE" = push-fail ]; then
@@ -107,6 +125,8 @@ case "${1:-}" in
       "service call agui_common 2 s16 "*)
         if [ "$MODE" = control-chars ]; then
           parcel_with_esc
+        elif [ "$MODE" = ws-chars ]; then
+          parcel_with_ws
         else
           parcel "$(cat "$STATE/led" 2>/dev/null || printf '120')"
         fi
@@ -123,6 +143,8 @@ case "${1:-}" in
           parcel 999
         elif [ "$MODE" = control-chars ]; then
           parcel_with_esc
+        elif [ "$MODE" = ws-chars ]; then
+          parcel_with_ws
         else
           parcel "$(cat "$STATE/key_$key" 2>/dev/null || printf '')"
         fi
