@@ -69,7 +69,7 @@ kb_shell() { kb_adb shell "$@"; }
 kb_find_device() {
   if [ -n "${KBLED_SERIAL:-}" ]; then
     command adb -s "$KBLED_SERIAL" get-state >/dev/null 2>&1 \
-      || kb_die "adb device '$KBLED_SERIAL' is not available"
+      || kb_die "adb device '$(kb_error_text "$KBLED_SERIAL")' is not available"
     kb_ok "device: $KBLED_SERIAL"
     return 0
   fi
@@ -425,11 +425,11 @@ kb_backup_load() {
     esac
     case "$line" in
       *=*) key=${line%%=*}; val=${line#*=} ;;
-      *) kb_err "backup: not a KEY=VALUE line in $file: $line"; return 1 ;;
+      *) kb_err "backup: not a KEY=VALUE line in $file: $(kb_error_text "$line")"; return 1 ;;
     esac
     case "$key" in
       KBLED_DEVICE | KBLED_TIMEOUT | KBLED_BACKUP | KBLED_BRIGHTNESS) : ;;
-      *) kb_err "backup: unknown key '$key' in $file"; return 1 ;;
+      *) kb_err "backup: unknown key '$(kb_error_text "$key")' in $file"; return 1 ;;
     esac
     # v1.0.0 wrote values with printf %q, which renders an empty value as ''.
     if [ "$val" = "''" ]; then
@@ -447,7 +447,7 @@ kb_backup_load() {
         # while the read failed); the caller falls back to the tool default.
         # Every non-empty value must be plain digits.
         case "$val" in
-          *[!0-9]*) kb_err "backup: $key must be a number (got '$val') in $file"; return 1 ;;
+          *[!0-9]*) kb_err "backup: $key must be a number (got '$(kb_error_text "$val")') in $file"; return 1 ;;
         esac
         if [ -n "$val" ]; then
           # A hand-edited or imported backup must not be able to push a value
@@ -461,7 +461,7 @@ kb_backup_load() {
             *) max=$KBLED_BIG_TIMEOUT ;;
           esac
           if ! kb_int_in_range "$val" "$min" "$max"; then
-            kb_err "backup: $key must be between $min and $max (got '$val') in $file"
+            kb_err "backup: $key must be between $min and $max (got '$(kb_error_text "$val")') in $file"
             return 1
           fi
           val=$(kb_decimal "$val")

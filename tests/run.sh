@@ -467,6 +467,63 @@ EOF
   expect_eq "$(device_value keyboard_led_brightness)" "0"
 }
 
+case_backup_error_text_sanitised() {
+  seed_device
+  local bf cr
+  bf=$(backup_path FAKESERIAL)
+  cr=$(printf '\r')
+
+  # A tampered backup carries whatever bytes its author put there. The parser
+  # must still refuse it (rc 1, nothing written to the device) and must quote
+  # the offending fragment back with those bytes neutralised, so refusing the
+  # file is not itself a way to reach the operator's terminal.
+  write_backup "$bf" <<EOF
+KBLED_DEVICE=FAKESERIAL
+BAD${ESC}LINE${cr}
+EOF
+  run_kbled_raw uninstall --serial FAKESERIAL
+  expect_rc 1 "$RC"
+  assert_no_esc "$OUT"
+  assert_no_raw_ws_controls "$OUT"
+  expect_contains "$OUT" "not a KEY=VALUE line"
+  expect_contains "$OUT" "BADLINE"
+
+  # The key of an unknown KEY=VALUE line is quoted back sanitised as well.
+  write_backup "$bf" <<EOF
+KBLED_DEVICE=FAKESERIAL
+BAD${ESC}KEY=1
+EOF
+  run_kbled_raw uninstall --serial FAKESERIAL
+  expect_rc 1 "$RC"
+  assert_no_esc "$OUT"
+  expect_contains "$OUT" "unknown key"
+  expect_contains "$OUT" "BADKEY"
+
+  # A rejected value: the ESC is deleted and the CR becomes a space, so the
+  # quoted value stays on one line instead of spoofing the terminal.
+  write_backup "$bf" <<EOF
+KBLED_DEVICE=FAKESERIAL
+KBLED_TIMEOUT=BAD${ESC}${cr}VALUE
+EOF
+  run_kbled_raw uninstall --serial FAKESERIAL
+  expect_rc 1 "$RC"
+  assert_no_esc "$OUT"
+  assert_no_raw_ws_controls "$OUT"
+  expect_contains "$OUT" "must be a number"
+  expect_contains "$OUT" "got 'BAD VALUE'"
+  expect_eq "$(count_matches "$FAKE_ADB_LOG" 'agui_common 4')" "0"
+
+  # The out-of-range message still names the value it rejected.
+  write_backup "$bf" <<'EOF'
+KBLED_DEVICE=FAKESERIAL
+KBLED_TIMEOUT=9999999999
+EOF
+  run_kbled_raw uninstall --serial FAKESERIAL
+  expect_rc 1 "$RC"
+  expect_contains "$OUT" "must be between 0 and 2147483647"
+  expect_contains "$OUT" "got '9999999999'"
+}
+
 case_zero_timeout_is_valid() {
   seed_device
   local bf
@@ -839,7 +896,8 @@ case_watcher_status_and_stop() {
 
 case_device_output_sanitised() {
   seed_device
-  local neutralised
+  local neutralised cr
+  cr=$(printf '\r')
   export FAKE_ADB_MODE=control-chars
 
   # status prints decoded device values; one of them carries an ESC byte.
@@ -906,6 +964,26 @@ case_device_output_sanitised() {
   assert_no_esc "$OUT"
   assert_no_raw_ws_controls "$OUT"
   expect_contains "$OUT" "unexpected characters in the adb serial"
+  expect_contains "$OUT" "BADSERIAL"
+
+  # A named device that does not answer: the serial is still named in the
+  # message, sanitised.
+  export FAKE_ADB_MODE=get-state-fail
+  run_kbled_raw status --serial VALIDBUTABSENT
+  expect_rc 1 "$RC"
+  assert_no_esc "$OUT"
+  expect_contains "$OUT" "adb device 'VALIDBUTABSENT' is not available"
+
+  # kb_find_device is reachable directly (the suite probes the backup helpers
+  # the same way), so a caller that skipped parse_args' serial validation must
+  # not be able to smuggle a control byte into its message either.
+  RC=0
+  OUT=$(KBLED_SERIAL="BAD${ESC}SERIAL${cr}" FAKE_ADB_MODE=get-state-fail bash -c \
+    ". '$ROOT/lib/common.sh'; kb_find_device" 2>&1) || RC=$?
+  expect_rc 1 "$RC"
+  assert_no_esc "$OUT"
+  assert_no_raw_ws_controls "$OUT"
+  expect_contains "$OUT" "is not available"
   expect_contains "$OUT" "BADSERIAL"
 }
 
@@ -1044,6 +1122,7 @@ for c in \
   case_backup_failure_after_temp_file \
   case_backup_injection_rejected \
   case_backup_value_validation \
+  case_backup_error_text_sanitised \
   case_zero_timeout_is_valid \
   case_backup_round_trip \
   case_legacy_and_missing_backup \

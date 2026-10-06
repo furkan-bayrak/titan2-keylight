@@ -78,6 +78,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   recorded key: it is the vendor's documented "disabled" timeout state (and a
   dark LED), so a device the stock tile switched off installs normally and a
   backup holding `0` is still a restore point.
+- The fragment a rejected backup file contributes to a parser error (the
+  offending line, key or value) is stripped of control bytes before it is
+  printed, so a tampered or imported backup cannot emit an escape sequence or
+  a carriage return at the moment the parser refuses it. The
+  `adb device '<serial>' is not available` message is sanitised the same way,
+  for callers that reach `kb_find_device` without a validated serial.
 
 ## [1.0.0] - 2026-10-06
 

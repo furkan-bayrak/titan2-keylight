@@ -28,6 +28,7 @@
 #   getprop-chars   getprop answers contain an ESC byte
 #   service-list-fail  'service list' fails
 #   getprop-fail    every getprop call fails
+#   get-state-fail  'adb -s <serial> get-state' reports the device as absent
 set -uo pipefail
 
 LOG=${FAKE_ADB_LOG:-/dev/null}
@@ -72,6 +73,9 @@ parcel_with_ws() {
 
 case "${1:-}" in
   get-state)
+    if [ "$MODE" = get-state-fail ]; then
+      exit 1
+    fi
     ;;
   devices)
     if [ "$MODE" = multi-device ]; then
