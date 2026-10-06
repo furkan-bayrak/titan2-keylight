@@ -330,6 +330,33 @@ case_failed_backup_save_keeps_previous() {
   expect_eq "$(find "$(dirname "$bf")" -name '.kbled-backup.*' -print 2>/dev/null)" ""
 }
 
+case_backup_failure_after_temp_file() {
+  seed_device
+  local bf before writes
+  bf=$(backup_path FAKESERIAL)
+
+  # A good backup first: the failure below has to leave it untouched.
+  run_kbled install --serial FAKESERIAL --no-watcher
+  expect_rc 0 "$RC"
+  before=$(cat "$bf")
+  writes=$(count_matches "$FAKE_ADB_LOG" 'agui_common 4')
+
+  # The device now answers the brightness read with something that cannot be
+  # recorded. The temporary file is written first, then the parse-back
+  # validation refuses it: this is the failure that happens after mktemp, so
+  # it exercises the cleanup path a direct write into $bf would not have.
+  printf 'not-a-number\n' >"$FAKE_ADB_STATE/key_keyboard_led_brightness"
+
+  run_kbled install --serial FAKESERIAL --force
+  expect_rc 1 "$RC"
+  expect_contains "$OUT" "the generated backup is incomplete"
+  # The refused value was found in the temporary file, not in the backup.
+  expect_contains "$OUT" ".kbled-backup."
+  expect_eq "$(cat "$bf")" "$before"
+  expect_eq "$(count_matches "$FAKE_ADB_LOG" 'agui_common 4')" "$writes"
+  expect_eq "$(find "$(dirname "$bf")" -name '.kbled-backup.*' -print 2>/dev/null)" ""
+}
+
 case_backup_injection_rejected() {
   seed_device
   local bf canary
@@ -944,6 +971,7 @@ for c in \
   case_backup_reused_and_forced \
   case_backup_path_not_a_file \
   case_failed_backup_save_keeps_previous \
+  case_backup_failure_after_temp_file \
   case_backup_injection_rejected \
   case_backup_value_validation \
   case_zero_timeout_is_valid \

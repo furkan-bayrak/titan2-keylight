@@ -13,6 +13,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   whose command line is not the watcher is neither reported as running nor
   killed, and the device-side `is_watcher` check is exercised against real
   processes.
+- Test coverage for a backup save that fails after the temporary file has been
+  written: the run reports it, the previous backup stays byte-identical and no
+  `.kbled-backup.*` file is left behind. A mutation that writes straight into
+  the backup path - skipping mktemp and the atomic rename - now fails the
+  suite.
 
 ### Changed
 - CI: `ludeeus/action-shellcheck` and `actions/checkout` are pinned to release
