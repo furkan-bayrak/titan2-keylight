@@ -626,6 +626,59 @@ EOF
   expect_contains "$OUT" "=no"
 }
 
+case_device_stop_script() {
+  local pid
+
+  if [ ! -r "/proc/$$/cmdline" ]; then
+    printf 'skipped: this host has no /proc\n'
+    return 0
+  fi
+
+  # A stand-in watcher that stops on SIGTERM: the pidfile goes away and the
+  # script exits 0.
+  cat >"$CASE_DIR/kbled_watch.sh" <<'EOF'
+#!/bin/sh
+while :; do sleep 1; done
+EOF
+  chmod 755 "$CASE_DIR/kbled_watch.sh"
+  sh "$CASE_DIR/kbled_watch.sh" &
+  pid=$!
+  printf '%s\n' "$pid" >"$CASE_DIR/pidfile"
+
+  RC=0
+  OUT=$(KBLED_PIDFILE="$CASE_DIR/pidfile" sh "$ROOT/device/kbled_stop.sh" 2>&1) || RC=$?
+  wait "$pid" 2>/dev/null || true
+  expect_rc 0 "$RC"
+  expect_contains "$OUT" "kbled watcher stopped (pid $pid)"
+  [ ! -f "$CASE_DIR/pidfile" ] || {
+    printf 'the pidfile was kept after a clean stop\n'
+    return 1
+  }
+
+  # A stand-in watcher that ignores SIGTERM: the script must say the process
+  # survived, keep the pidfile and exit non-zero instead of pretending.
+  cat >"$CASE_DIR/kbled_watch_survivor.sh" <<'EOF'
+#!/bin/sh
+trap '' TERM
+while :; do sleep 1; done
+EOF
+  chmod 755 "$CASE_DIR/kbled_watch_survivor.sh"
+  sh "$CASE_DIR/kbled_watch_survivor.sh" &
+  pid=$!
+  printf '%s\n' "$pid" >"$CASE_DIR/pidfile"
+
+  RC=0
+  OUT=$(KBLED_PIDFILE="$CASE_DIR/pidfile" sh "$ROOT/device/kbled_stop.sh" 2>&1) || RC=$?
+  kill -9 "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  expect_rc 1 "$RC"
+  expect_contains "$OUT" "did not stop"
+  [ -f "$CASE_DIR/pidfile" ] || {
+    printf 'the pidfile was removed although the watcher survived\n'
+    return 1
+  }
+}
+
 case_recycled_pid_guard() {
   seed_device
   local bf
@@ -867,6 +920,7 @@ for c in \
   case_device_is_off_parser \
   case_device_is_watcher \
   case_recycled_pid_guard \
+  case_device_stop_script \
   case_watcher_status_and_stop \
   case_device_output_sanitised \
   case_error_reporting \

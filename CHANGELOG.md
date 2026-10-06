@@ -38,7 +38,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   backup path that exists but is not a regular file, instead of nesting the
   temporary file inside it.
 - `kbled stop` stops the watcher through its pidfile when the on-device stop
-  script is missing or fails, instead of leaving it running silently.
+  script is missing or fails, instead of leaving it running silently. The
+  on-device stop script verifies that the process is really gone before it
+  removes the pidfile, and reports a watcher that survived the kill instead of
+  pretending it stopped.
 - A stale or recycled pid is no longer mistaken for a running watcher, and the
   pidfile content is validated before it reaches the device shell.
 - A failed vendor-key write is reported with the `adb` exit status instead of

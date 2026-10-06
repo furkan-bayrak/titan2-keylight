@@ -15,6 +15,17 @@ if [ -f "$PIDFILE" ]; then
   pid=$(cat "$PIDFILE" 2>/dev/null)
   if is_watcher "$pid"; then
     kill "$pid" 2>/dev/null
+    # Do not remove the pidfile until the watcher is really gone: a kill that
+    # did not take effect must be reported, not silently forgotten.
+    n=0
+    while [ "$n" -lt 10 ] && is_watcher "$pid"; do
+      sleep 0.2
+      n=$((n + 1))
+    done
+    if is_watcher "$pid"; then
+      echo "kbled watcher (pid $pid) did not stop; keeping $PIDFILE" >&2
+      exit 1
+    fi
     rm -f "$PIDFILE"
     echo "kbled watcher stopped (pid $pid)"
     exit 0
