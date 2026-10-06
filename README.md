@@ -1,166 +1,168 @@
-# titan2-keylight — always-on keyboard backlight for the Titan 2 / Titan 2 Elite
+# titan2-keylight
 
-Keep the physical-keyboard backlight on for as long as the screen is on, instead
-of the stock 30-second cap — while still being able to switch it off during the
-day from the stock **`keyboard_led`** Quick Settings tile.
+Keep the keyboard backlight on your Unihertz Titan 2 or Titan 2 Elite on for as long as the screen is on, and still turn it off with the phone's own Quick Settings tile when you want to.
 
-> Unofficial community project. Not affiliated with or endorsed by Unihertz or
-> Agui. Use at your own risk.
-
-## The problem
-
-On the Titan 2 / Titan 2 Elite the keyboard backlight is managed by a vendor
-service (`com.agui.server.functional.KeyboardLightController`) and a vendor
-key/value store (`/data/system/agui_settings_data.xml`). The stock maximum
-timeout is 30 seconds, and the setting is not exposed through the normal Android
-Settings database.
+> Unofficial community project. Not affiliated with or endorsed by Unihertz or Agui. Use at your own risk.
 
 ## What this does
 
-`kbled` writes a near-infinite timeout (`2147483647` ms ≈ 24.8 days) into the
-vendor store through the `agui_common` binder service. The result:
+The Titan 2 turns the keyboard backlight off a few seconds after your last key press, and the phone has no setting to keep it on. This project changes the hidden timeout behind that behaviour, so the backlight stays on the whole time the screen is on. It still goes off when the screen goes off, and comes back on when the screen wakes up.
 
-- the backlight stays on the whole time the screen is on,
-- it still turns off when the screen turns off and back on when the screen wakes,
-- the stock `keyboard_led` tile keeps working: **ON** = always-on, **OFF** = off.
+The `keyboard_led` tile in Quick Settings (the panel you pull down from the top of the screen) keeps working exactly as before:
 
-The tile's "off" path only writes `timeout=0` without powering the LED off
-immediately, so `kbled` also installs a tiny on-device watcher that notices the
-toggle and turns the LED off instantly. No root and no malware-style tricks — it
-only uses the vendor service the Settings app itself uses.
+- tile **on**: backlight on whenever the screen is on,
+- tile **off**: backlight off immediately.
+
+No root, no custom firmware, no extra app installed on the phone. The scripts only use the same hidden vendor service that the phone's own Settings app uses.
 
 ## Requirements
 
-- A Titan 2 / Titan 2 Elite (or another device exposing the `agui_common`
-  service). Run `./kbled doctor` to check.
-- `adb` (Android platform-tools) on your computer, with the phone authorized
-  over USB **or** wireless debugging.
-- `bash` and `awk`. No Python, no root.
+- A Unihertz Titan 2 or Titan 2 Elite, or another phone that exposes the same `agui_common` vendor service. `./kbled doctor` checks this before anything is changed.
+- A computer (macOS, Linux or Windows) with `adb` installed. `adb` is Google's free command-line tool for talking to an Android phone from a computer; it comes in the "Android platform-tools" package.
+- `bash` and `awk` on that computer; no Python is needed. Both are already installed on macOS and Linux; on Windows, use WSL or Git Bash.
+- A USB cable, or wireless debugging turned on (see step 2 below). No root is needed.
 
 ## Install
 
-```sh
+### 1. Get the code
+
+```bash
 git clone https://github.com/furkan-bayrak/titan2-keylight.git
 cd titan2-keylight
+```
+
+### 2. Connect the phone
+
+With a USB cable:
+
+```bash
+adb devices
+```
+
+USB debugging must be turned on in Developer options. If Developer options is not in your Settings app yet, Android shows it after you tap the build number in Settings > About phone seven times. The first time you connect, the phone asks whether to trust the computer; tap Allow. Your phone should appear in the list with the word `device` next to it.
+
+Over Wi-Fi, using wireless debugging:
+
+Wireless debugging is an Android feature that lets `adb` talk to the phone over your Wi-Fi network instead of a cable. Turn it on in **Developer options > Wireless debugging** (the phone shows the IP address and ports there), then run these two commands; the pairing step is only needed the first time:
+
+```bash
+adb pair <ip>:<pairing-port>    # the code is shown on the phone
+adb connect <ip>:<port>         # the port is shown in the Wireless debugging screen
+```
+
+### 3. Install
+
+```bash
 ./install.sh
 ```
 
-Or directly:
+`install.sh` is a shortcut for `./kbled install`, so either command does the same thing.
 
-```sh
-./kbled install
+The script checks the phone, saves your original settings, writes the new timeout and starts a small helper (see Everyday use). A single connected device is picked automatically; if you have more than one, add `--serial <serial>`, using the serial shown by `adb devices`.
+
+## First use
+
+The change takes effect straight away. With the screen on, type something and stop: the backlight should stay on. To check the settings and the helper, run:
+
+```bash
+./kbled status
 ```
 
-### Wireless debugging
+Extra options for `install`:
 
-If you don't have a USB cable:
+- `--timeout-ms MS` - how long the light stays on. The default is `2147483647` ms, about 24.8 days, which is effectively "as long as the screen is on".
+- `--brightness N` - LED brightness from 0 to 100. By default your current brightness is left alone.
+- `--no-watcher` - do not start the helper. The backlight is still always-on, but the tile's "off" then applies at the next screen off/on cycle.
+- `-s, --serial S` - choose a specific device, or set `KBLED_SERIAL`.
 
-1. On the phone: **Developer options → Wireless debugging → on**.
-2. Pair once (only needed the first time):
-   ```sh
-   adb pair <ip>:<pairing-port>     # code shown on the phone
-   ```
-3. Connect:
-   ```sh
-   adb connect <ip>:<port>          # port shown in Wireless debugging
-   ```
-4. Run `./kbled install` (it picks the only connected device automatically; use
-   `--serial` if you have several).
-
-## Usage
-
-```sh
-./kbled install     # apply the mod and start the watcher (default command)
-./kbled status      # show current settings and watcher state
-./kbled start       # start the watcher (e.g. after a reboot)
-./kbled stop        # stop the watcher
-./kbled uninstall   # restore the original settings and remove the watcher
-./kbled doctor      # check device support
-```
-
-Options:
-
-| Option | Description |
-|---|---|
-| `--timeout-ms MS` | timeout to write (default `2147483647`) |
-| `--brightness N` | set LED brightness 0–100 (default: leave unchanged) |
-| `--no-watcher` | don't start the background watcher |
-| `-s, --serial S` | choose a specific adb device |
-| `-f, --force` | overwrite an existing backup on install |
-
-Examples:
-
-```sh
-./kbled install --timeout-ms 3600000      # 1 hour instead of 24 days
+```bash
+./kbled install --timeout-ms 3600000    # one hour instead of "always"
 ./kbled install --brightness 60
-./kbled install --no-watcher              # always-on, but "off" waits for a screen cycle
+./kbled install --no-watcher
 ```
 
-The first install saves your original values to
-`~/.config/kbled/backup-<serial>.env`; `uninstall` restores from there.
+The first install saves your phone's original values to a small file on your computer at `~/.config/kbled/backup-<serial>.env`, and `uninstall` restores from it. Later installs keep the first backup as your clean restore point unless you pass `--force` to replace it.
 
 ## Everyday use
 
-Leave the phone as normal. The stock Quick Settings tile now means:
+Use the phone as usual. The backlight stays on while the screen is on, and the Quick Settings tile means:
 
-| Tile | Effect |
-|---|---|
-| **ON** | backlight on whenever the screen is on |
-| **OFF** | backlight off immediately |
+| Tile | What happens |
+| --- | --- |
+| on | backlight on whenever the screen is on |
+| off | backlight off immediately |
+
+The instant "off" comes from a small helper script (the "watcher") that runs on the phone and watches for that tap. It does nothing else.
+
+All commands, run from the cloned folder:
+
+| Command | What it does |
+| --- | --- |
+| `./kbled install` | apply the change and start the watcher (what `./install.sh` runs) |
+| `./kbled status` | show the current settings and watcher state |
+| `./kbled start` | start the watcher |
+| `./kbled stop` | stop the watcher |
+| `./kbled uninstall` | restore the original settings and remove the watcher |
+| `./kbled doctor` | check that the phone is supported |
+| `./kbled version` | print the version |
 
 ## After a reboot
 
-The timeout settings persist across reboots. The watcher process does **not**
-start automatically (that would require root or a boot app). After a reboot run:
+The timeout setting is stored on the phone, so the always-on backlight survives a reboot. The watcher does not start by itself, because starting it automatically would need root or a boot app. After a reboot, run:
 
-```sh
+```bash
 ./kbled start
 ```
 
-Without the watcher the always-on mod still works; only the tile's instant "off"
-is lost (it would apply on the next screen off/on). To automate it without root,
-install [Termux:Boot](https://f-droid.org/packages/com.termux.boot/) and have it
-run `kbled start`, or just re-run the command when you plug in.
+Without the watcher, the always-on part still works. Only the tile's instant "off" is lost; the light would then go off at the next screen off/on cycle.
 
-## Uninstall / revert
+To make this automatic without root, install [Termux:Boot](https://f-droid.org/packages/com.termux.boot/) and have it run `kbled start`, or simply run the command the next time you plug the phone in.
 
-```sh
-./uninstall.sh          # or ./kbled uninstall
+## Troubleshooting
+
+- **"no authorized adb device found"** - the computer cannot see the phone. Run `adb devices`; if nothing is listed, authorize the computer on the phone, or reconnect wireless debugging.
+- **"agui_common service not found"** - your firmware does not have the hidden vendor service this tool uses, so the phone is not supported and nothing is changed. Please open an issue with the output of `./kbled doctor`.
+- **"write verification failed"** - the phone did not keep the new value, which usually means a firmware update changed that vendor service. Run `./kbled uninstall` to put your original values back, then open an issue with the output of `./kbled doctor`.
+- **Tile "off" does not switch the light off immediately** - the watcher is not running. Run `./kbled start` and check `./kbled status`.
+- **Multiple devices connected** - pass `--serial <serial>` or set `KBLED_SERIAL`.
+
+## Uninstall
+
+```bash
+./uninstall.sh
 ```
 
-This restores your saved values and removes the on-device scripts. To wipe the
-backup as well: `rm -rf ~/.config/kbled`.
+or `./kbled uninstall`. This stops the watcher, restores the values saved at install time and deletes the helper scripts from the phone.
+
+If no backup file is found (for example, if you installed from another computer), the timeout is reset to `30000` ms instead.
+
+To delete the backup file from your computer as well:
+
+```bash
+rm -rf ~/.config/kbled
+```
 
 ## Compatibility
 
 Tested on:
 
-| Device | Android | Result |
-|---|---|---|
+| Phone | Android | Result |
+| --- | --- | --- |
 | Unihertz Titan 2 (`Titan_2`) | 16 | works |
 
-The Titan 2 Elite likely uses the same Agui keyboard stack. `./kbled doctor`
-verifies the `agui_common` service and the expected key before changing
-anything; if your firmware is unsupported it aborts without writing.
+The Titan 2 Elite most likely uses the same Agui keyboard stack, but it has not been tested here.
 
-## Troubleshooting
-
-- **`no authorized adb device found`** — check `adb devices`; authorize the
-  computer on the phone, or reconnect wireless debugging.
-- **`agui_common service not found`** — your firmware/variant doesn't expose the
-  vendor service. Please open an issue with `./kbled doctor` output.
-- **Tile OFF doesn't switch the light off immediately** — the watcher isn't
-  running. Run `./kbled start` and check `./kbled status`.
-- **Multiple devices** — pass `--serial <serial>` or set `KBLED_SERIAL`.
+Before writing anything, `./kbled doctor` checks for the hidden vendor service and the expected setting, and the installer verifies every value it writes. If your firmware is unsupported, the script stops without changing anything.
 
 ## How it works
 
-See [docs/TECHNICAL.md](docs/TECHNICAL.md) for the full reverse-engineering
-notes: the vendor keys, the binder transaction codes, and the watcher design.
+The keyboard backlight is not a normal Android setting. It lives in a hidden vendor file that only a system service can reach, so `kbled` asks that service (the same one the Settings app uses) to store a very large timeout, and keeps a small watcher running that makes the Quick Settings tile turn the light off instantly. Nothing is patched and no root is used.
+
+The full reverse-engineering notes, including the vendor keys, the binder transaction codes and the watcher design, are in [docs/TECHNICAL.md](docs/TECHNICAL.md).
 
 ## Contributing
 
-Issues and PRs welcome. Run `shellcheck` before submitting; CI does the same.
+Issues and pull requests are welcome. Please run `shellcheck` before submitting; the CI runs it on every push and pull request.
 
 ## License
 
