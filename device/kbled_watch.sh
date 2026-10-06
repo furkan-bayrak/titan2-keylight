@@ -16,6 +16,9 @@
 
 KBLED_PIDFILE=${KBLED_PIDFILE:-/data/local/tmp/kbled_watch.pid}
 KBLED_INTERVAL=${KBLED_INTERVAL:-2}
+# Overridable so the parser below can be exercised off-device by the tests.
+KBLED_SERVICE=${KBLED_SERVICE:-/system/bin/service}
+KBLED_AM=${KBLED_AM:-/system/bin/am}
 
 # Refuse to run twice: if the pidfile points at a live watcher, exit instead
 # of starting a second poller. Covers a direct run of this script next to an
@@ -43,7 +46,7 @@ trap 'rm -f "$KBLED_PIDFILE"' EXIT
 #   word1 = string length (UTF-16 code units)
 #   word2.. = one or two code units per 32-bit little-endian word
 is_off() {
-  out=$(/system/bin/service call agui_common 3 s16 keyboard_brightness_timeout s16 -1 2>/dev/null)
+  out=$("$KBLED_SERVICE" call agui_common 3 s16 keyboard_brightness_timeout s16 -1 2>/dev/null)
   # drop the "0x00000000:" address prefixes, keep 8-hex words only
   words=$(printf '%s\n' "$out" | sed 's/0x[0-9a-fA-F]*://g' | grep -oE '[0-9a-fA-F]{8}')
   n=$(printf '%s\n' "$words" | sed -n '2p')
@@ -59,7 +62,7 @@ prev=1
 while true; do
   if is_off; then v=0; else v=1; fi
   if [ "$v" -eq 0 ] && [ "$prev" -ne 0 ]; then
-    /system/bin/am broadcast -a agui.action.CLOSE_KEYBOARD_LIGHT >/dev/null 2>&1
+    "$KBLED_AM" broadcast -a agui.action.CLOSE_KEYBOARD_LIGHT >/dev/null 2>&1
   fi
   prev=$v
   sleep "$KBLED_INTERVAL"

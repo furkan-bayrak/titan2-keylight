@@ -1,0 +1,570 @@
+#!/usr/bin/env bash
+# kbled test suite.
+#
+#   bash tests/run.sh
+#
+# No dependencies beyond a POSIX shell, awk and the standard coreutils; no
+# network and no device. Every adb call goes to tests/stubs/adb, which answers
+# from files under a scratch directory. Run from anywhere.
+set -uo pipefail
+
+TESTS_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+ROOT=$(cd "$TESTS_DIR/.." && pwd)
+STUB_DIR="$TESTS_DIR/stubs"
+FIXTURES="$TESTS_DIR/fixtures"
+KBLED="$ROOT/kbled"
+
+# The stub must win over any real adb in PATH, otherwise a test could talk to
+# a real phone.
+PATH="$STUB_DIR:$PATH"
+export PATH
+
+if [ "$(command -v adb)" != "$STUB_DIR/adb" ]; then
+  printf 'FATAL: adb in PATH is %s, not the test stub - refusing to run\n' "$(command -v adb)" >&2
+  exit 1
+fi
+if ! command -v awk >/dev/null 2>&1; then
+  printf 'FATAL: awk not found in PATH\n' >&2
+  exit 1
+fi
+
+TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/kbled-tests.XXXXXX")
+ESC=$(printf '\033')
+pass=0
+fail=0
+
+# No rm -rf anywhere in this repo: delete the scratch tree bottom-up instead,
+# and keep it around when something failed so it can be inspected.
+cleanup() {
+  if [ "$fail" -gt 0 ]; then
+    printf '\nscratch kept for debugging: %s\n' "$TMP_ROOT"
+    return 0
+  fi
+  if [ -n "${TMP_ROOT:-}" ] && [ "$TMP_ROOT" != "/" ] && [ -d "$TMP_ROOT" ]; then
+    find "$TMP_ROOT" -depth -delete 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT
+
+# --- helpers available to every case ----------------------------------------
+
+strip_ansi() { sed "s/${ESC}\[[0-9;]*m//g"; }
+
+expect_rc() { # expected actual
+  [ "$1" = "$2" ] || {
+    printf 'exit status: expected %s, got %s\n' "$1" "$2"
+    return 1
+  }
+}
+
+expect_eq() { # actual expected
+  [ "$1" = "$2" ] || {
+    printf 'value mismatch:\n  expected: [%s]\n  actual:   [%s]\n' "$2" "$1"
+    return 1
+  }
+}
+
+expect_contains() { # haystack needle
+  case "$1" in
+    *"$2"*) return 0 ;;
+  esac
+  printf 'output does not contain [%s]:\n%s\n' "$2" "$1"
+  return 1
+}
+
+# Run ./kbled: exit status in $RC, output (stdout+stderr, colours stripped) in $OUT.
+run_kbled() {
+  local raw
+  RC=0
+  raw=$("$KBLED" "$@" 2>&1) || RC=$?
+  OUT=$(printf '%s' "$raw" | strip_ansi)
+}
+
+# Run the device-side parser or another snippet from lib/common.sh in a plain
+# shell: run_sh <script>
+run_sh() { # script
+  local script=$1
+  RC=0
+  OUT=$(sh -c "$script" 2>&1) || RC=$?
+}
+
+# Run ./kbled with a serial in the environment instead of on the command line.
+run_kbled_env() { # serial, args...
+  local serial=$1 raw
+  shift
+  RC=0
+  raw=$(KBLED_SERIAL="$serial" "$KBLED" "$@" 2>&1) || RC=$?
+  OUT=$(printf '%s' "$raw" | strip_ansi)
+}
+
+# Seed the fake device with the values a stock Titan 2 reports.
+seed_device() {
+  mkdir -p "$FAKE_ADB_STATE/dev"
+  printf '5000\n' >"$FAKE_ADB_STATE/key_keyboard_brightness_timeout"
+  printf '5000\n' >"$FAKE_ADB_STATE/key_keyboard_brightness_timeout_backup"
+  printf '50\n' >"$FAKE_ADB_STATE/key_keyboard_led_brightness"
+  printf '1\n' >"$FAKE_ADB_STATE/key_keyboard_led_auto_switch"
+  printf '120\n' >"$FAKE_ADB_STATE/led"
+}
+
+device_value() { # key
+  cat "$FAKE_ADB_STATE/key_$1" 2>/dev/null || true
+}
+
+adb_log() { cat "$FAKE_ADB_LOG" 2>/dev/null || true; }
+
+count_matches() { # file pattern
+  local n
+  n=$(grep -c -- "$2" "$1" 2>/dev/null || true)
+  printf '%s' "${n:-0}"
+}
+
+backup_path() { # serial
+  printf '%s/kbled/backup-%s.env\n' "$XDG_CONFIG_HOME" "$1"
+}
+
+write_backup() { # path, lines on stdin
+  mkdir -p "$(dirname "$1")"
+  cat >"$1"
+}
+
+# --- cases ------------------------------------------------------------------
+
+case_help() {
+  run_kbled --help
+  expect_rc 0 "$RC"
+  expect_contains "$OUT" "Usage: kbled [options] [command]"
+  expect_contains "$OUT" "Options for 'install' only:"
+}
+
+case_usage_errors_exit_2() {
+  local args
+  for args in \
+    "bogus-command" \
+    "install uninstall" \
+    "status --force" \
+    "uninstall --brightness 5" \
+    "doctor --no-watcher" \
+    "version --serial FAKESERIAL" \
+    "--nope" \
+    "install --timeout-ms" \
+    "install --serial"; do
+    # shellcheck disable=SC2086
+    run_kbled $args
+    expect_rc 2 "$RC" || {
+      printf 'arguments [%s] were not rejected\n' "$args"
+      return 1
+    }
+  done
+}
+
+case_value_validation() {
+  local args
+  for args in \
+    "install --timeout-ms 0" \
+    "install --timeout-ms 2147483648" \
+    "install --timeout-ms 99999999999999999999" \
+    "install --timeout-ms 1e6" \
+    "install --brightness 101" \
+    "install --brightness -1" \
+    "install --brightness 5.5" \
+    "status --serial a/b" \
+    "status --serial a b"; do
+    # shellcheck disable=SC2086
+    run_kbled $args
+    expect_rc 2 "$RC" || {
+      printf 'arguments [%s] were not rejected\n' "$args"
+      return 1
+    }
+  done
+
+  # Accepted values are normalised before they reach the device.
+  seed_device
+  run_kbled install --serial FAKESERIAL --no-watcher --timeout-ms 0007 --brightness 000
+  expect_rc 0 "$RC"
+  expect_contains "$(adb_log)" "s16 keyboard_brightness_timeout s16 7"
+  expect_contains "$(adb_log)" "s16 keyboard_led_brightness s16 0"
+}
+
+case_install_end_to_end() {
+  seed_device
+  run_kbled install --serial FAKESERIAL
+  expect_rc 0 "$RC"
+  expect_contains "$OUT" "found agui_common system service"
+  expect_contains "$OUT" "saved current settings to"
+  expect_contains "$OUT" "keyboard_brightness_timeout = 2147483647"
+  expect_contains "$OUT" "keyboard_brightness_timeout_backup = 2147483647"
+  expect_contains "$OUT" "watcher started"
+  expect_contains "$(adb_log)" "push $ROOT/device/kbled_watch.sh /data/local/tmp/kbled_watch.sh"
+
+  expect_eq "$(device_value keyboard_brightness_timeout)" "2147483647"
+  expect_eq "$(device_value keyboard_brightness_timeout_backup)" "2147483647"
+  expect_eq "$(device_value keyboard_led_brightness)" "50"
+
+  # The backup is private, lives in a private directory and holds the values
+  # that were on the device when install ran.
+  local bf
+  bf=$(backup_path FAKESERIAL)
+  expect_contains "$(cat "$bf")" "KBLED_DEVICE=FAKESERIAL"
+  expect_contains "$(cat "$bf")" "KBLED_TIMEOUT=5000"
+  expect_contains "$(cat "$bf")" "KBLED_BACKUP=5000"
+  expect_contains "$(cat "$bf")" "KBLED_BRIGHTNESS=50"
+  if [ -z "$(find "$bf" -perm 600 -print 2>/dev/null)" ]; then
+    printf 'backup is not mode 0600: %s\n' "$(ls -l "$bf")"
+    return 1
+  fi
+  if [ -z "$(find "$(dirname "$bf")" -perm 700 -print 2>/dev/null)" ]; then
+    printf 'backup directory is not mode 0700: %s\n' "$(ls -ld "$(dirname "$bf")")"
+    return 1
+  fi
+}
+
+case_backup_reused_and_forced() {
+  seed_device
+  local bf before
+  bf=$(backup_path FAKESERIAL)
+
+  run_kbled install --serial FAKESERIAL
+  expect_rc 0 "$RC"
+  before=$(cat "$bf")
+
+  # A second install keeps the existing restore point.
+  printf '6000\n' >"$FAKE_ADB_STATE/key_keyboard_brightness_timeout"
+  run_kbled install --serial FAKESERIAL
+  expect_rc 0 "$RC"
+  expect_contains "$OUT" "keeping it as the restore point"
+  expect_eq "$(cat "$bf")" "$before"
+
+  # --force replaces it with the values currently on the device.
+  printf '6000\n' >"$FAKE_ADB_STATE/key_keyboard_brightness_timeout"
+  run_kbled install --serial FAKESERIAL --force
+  expect_rc 0 "$RC"
+  expect_contains "$(cat "$bf")" "KBLED_TIMEOUT=6000"
+}
+
+case_failed_backup_save_keeps_previous() {
+  seed_device
+  local bf before
+  bf=$(backup_path FAKESERIAL)
+
+  run_kbled install --serial FAKESERIAL
+  expect_rc 0 "$RC"
+  before=$(cat "$bf")
+
+  # Simulate a device that stops answering while a new backup is captured.
+  RC=0
+  FAKE_ADB_MODE=read-fail bash -c \
+    ". '$ROOT/lib/common.sh'; KBLED_SERIAL=FAKESERIAL; kb_save_backup '$bf'" >/dev/null 2>&1 || RC=$?
+  expect_rc 1 "$RC"
+  expect_eq "$(cat "$bf")" "$before"
+  expect_eq "$(find "$(dirname "$bf")" -name '.kbled-backup.*' -print 2>/dev/null)" ""
+}
+
+case_backup_injection_rejected() {
+  seed_device
+  local bf canary
+  bf=$(backup_path FAKESERIAL)
+  canary="$CASE_DIR/pwned"
+
+  # A tampered backup must never be sourced or fed to a shell.
+  write_backup "$bf" <<EOF
+KBLED_DEVICE=FAKESERIAL
+KBLED_TIMEOUT=5; touch $canary
+EOF
+  run_kbled uninstall --serial FAKESERIAL
+  expect_rc 1 "$RC"
+  expect_contains "$OUT" "refusing to restore from an invalid backup file"
+  expect_eq "$(count_matches "$FAKE_ADB_LOG" 'agui_common 4')" "0"
+  [ ! -f "$canary" ] || {
+    printf 'the backup was executed\n'
+    return 1
+  }
+
+  # Command substitution is just as inert.
+  write_backup "$bf" <<EOF
+KBLED_DEVICE=FAKESERIAL
+KBLED_TIMEOUT=\$(touch $canary)
+EOF
+  run_kbled uninstall --serial FAKESERIAL
+  expect_rc 1 "$RC"
+  [ ! -f "$canary" ] || {
+    printf 'the backup was executed\n'
+    return 1
+  }
+
+  # Unknown keys and non-numeric values are refused as well.
+  write_backup "$bf" <<'EOF'
+KBLED_DEVICE=FAKESERIAL
+EVIL=$(reboot)
+EOF
+  run_kbled uninstall --serial FAKESERIAL
+  expect_rc 1 "$RC"
+
+  write_backup "$bf" <<'EOF'
+KBLED_DEVICE=FAKESERIAL; reboot
+KBLED_TIMEOUT=5000
+EOF
+  run_kbled uninstall --serial FAKESERIAL
+  expect_rc 1 "$RC"
+  expect_eq "$(count_matches "$FAKE_ADB_LOG" 'agui_common 4')" "0"
+}
+
+case_backup_round_trip() {
+  seed_device
+  run_kbled install --serial FAKESERIAL --timeout-ms 6000 --brightness 42
+  expect_rc 0 "$RC"
+  expect_eq "$(device_value keyboard_brightness_timeout)" "6000"
+  expect_eq "$(device_value keyboard_brightness_timeout_backup)" "6000"
+  expect_eq "$(device_value keyboard_led_brightness)" "42"
+
+  run_kbled uninstall --serial FAKESERIAL
+  expect_rc 0 "$RC"
+  expect_contains "$OUT" "restored original settings from"
+  expect_eq "$(device_value keyboard_brightness_timeout)" "5000"
+  expect_eq "$(device_value keyboard_brightness_timeout_backup)" "5000"
+  expect_eq "$(device_value keyboard_led_brightness)" "50"
+  expect_contains "$(adb_log)" "rm -f /data/local/tmp/kbled_watch.sh"
+}
+
+case_legacy_and_missing_backup() {
+  seed_device
+  local bf
+  bf=$(backup_path FAKESERIAL)
+
+  # v1.0.0 wrote values with printf %q, so an unread value was stored as ''.
+  write_backup "$bf" <<'EOF'
+KBLED_DEVICE=FAKESERIAL
+KBLED_TIMEOUT=5000
+KBLED_BACKUP=''
+KBLED_BRIGHTNESS=''
+EOF
+  run_kbled uninstall --serial FAKESERIAL
+  expect_rc 0 "$RC"
+  expect_eq "$(device_value keyboard_brightness_timeout)" "5000"
+  expect_eq "$(device_value keyboard_brightness_timeout_backup)" "30000"
+
+  # Without a backup the tool must say what it writes and warn about it.
+  seed_device
+  rm -f "$bf"
+  run_kbled uninstall --serial FAKESERIAL
+  expect_rc 0 "$RC"
+  expect_contains "$OUT" "no backup found"
+  expect_contains "$OUT" "not a guaranteed restore of the stock value (the vendor default is 5000 ms)"
+  expect_eq "$(device_value keyboard_brightness_timeout)" "30000"
+}
+
+case_parcel_decoder() {
+  local out
+  out=$(
+    # shellcheck source=../lib/common.sh
+    . "$ROOT/lib/common.sh"
+    kb_decode_parcel <"$FIXTURES/parcel-timeout-100.txt"
+  )
+  expect_eq "$out" "100"
+
+  out=$(
+    . "$ROOT/lib/common.sh"
+    kb_decode_parcel <"$FIXTURES/parcel-timeout-5000.txt"
+  )
+  expect_eq "$out" "5000"
+
+  # A reply that is not a parcel is a failure, not an empty value.
+  run_sh ". '$ROOT/lib/common.sh'
+    out=\$(printf 'error: device offline\n' | kb_decode_parcel); rc=\$?
+    printf 'rc=%s out=[%s]\n' \"\$rc\" \"\$out\""
+  expect_contains "$OUT" "rc=1 out=[]"
+}
+
+case_device_is_off_parser() {
+  # The device script parses the same parcel with toybox tools. Run its own
+  # is_off() against recorded replies, with service replaced by a stub.
+  local is_off
+  is_off=$(awk '/^is_off\(\) \{/,/^\}/' "$ROOT/device/kbled_watch.sh")
+  expect_contains "$is_off" "keyboard_brightness_timeout"
+
+  cat >"$CASE_DIR/service" <<'EOF'
+#!/bin/sh
+cat "$FAKE_SERVICE_REPLY"
+EOF
+  chmod 755 "$CASE_DIR/service"
+
+  RC=0
+  OUT=$(FAKE_SERVICE_REPLY="$FIXTURES/parcel-timeout-0.txt" KBLED_SERVICE="$CASE_DIR/service" \
+    sh -c "$is_off
+      if is_off; then echo off; else echo on; fi" 2>&1) || RC=$?
+  expect_rc 0 "$RC"
+  expect_eq "$OUT" "off"
+
+  RC=0
+  OUT=$(FAKE_SERVICE_REPLY="$FIXTURES/parcel-timeout-5000.txt" KBLED_SERVICE="$CASE_DIR/service" \
+    sh -c "$is_off
+      if is_off; then echo off; else echo on; fi" 2>&1) || RC=$?
+  expect_rc 0 "$RC"
+  expect_eq "$OUT" "on"
+
+  # A parcel that is not the timeout at all is never treated as "off".
+  OUT=$(FAKE_SERVICE_REPLY="$FIXTURES/parcel-timeout-100.txt" KBLED_SERVICE="$CASE_DIR/service" \
+    sh -c "$is_off
+      if is_off; then echo off; else echo on; fi" 2>&1) || RC=$?
+  expect_eq "$OUT" "on"
+}
+
+case_watcher_status_and_stop() {
+  seed_device
+  run_kbled install --serial FAKESERIAL
+  expect_rc 0 "$RC"
+
+  run_kbled status --serial FAKESERIAL
+  expect_rc 0 "$RC"
+  expect_contains "$OUT" "$(printf '%-36s %s' watcher 'running (pid 4242)')"
+
+  # Without the on-device stop script the pidfile has to be used instead.
+  rm -f "$FAKE_ADB_STATE/dev/kbled_stop.sh"
+  run_kbled stop --serial FAKESERIAL
+  expect_rc 0 "$RC"
+  expect_contains "$OUT" "falling back to the pidfile"
+  expect_contains "$OUT" "watcher stopped (pid 4242)"
+
+  run_kbled status --serial FAKESERIAL
+  expect_contains "$OUT" "not running"
+
+  # A stale pidfile whose pid belongs to something else is not the watcher.
+  printf '4242\n' >"$FAKE_ADB_STATE/dev/kbled_watch.pid"
+  rm -f "$FAKE_ADB_STATE/watcher_live"
+  run_kbled status --serial FAKESERIAL
+  expect_contains "$OUT" "not running"
+
+  # Garbage in the pidfile never reaches the device shell.
+  printf '4242; touch %s\n' "$CASE_DIR/pwned" >"$FAKE_ADB_STATE/dev/kbled_watch.pid"
+  run_kbled status --serial FAKESERIAL
+  expect_contains "$OUT" "not running"
+  run_kbled stop --serial FAKESERIAL
+  expect_contains "$OUT" "no watcher running"
+  [ ! -f "$CASE_DIR/pwned" ] || {
+    printf 'the pidfile content was executed\n'
+    return 1
+  }
+  expect_eq "$(count_matches "$FAKE_ADB_LOG" '4242; touch')" "0"
+}
+
+case_error_reporting() {
+  seed_device
+
+  export FAKE_ADB_MODE=write-fail
+  run_kbled install --serial FAKESERIAL
+  expect_rc 1 "$RC"
+  expect_contains "$OUT" "failed to write keyboard_brightness_timeout"
+
+  export FAKE_ADB_MODE=verify-fail
+  run_kbled install --serial FAKESERIAL --force
+  expect_rc 1 "$RC"
+  expect_contains "$OUT" "write verification failed for keyboard_brightness_timeout: got '999'"
+
+  export FAKE_ADB_MODE=read-fail
+  run_kbled status --serial FAKESERIAL
+  expect_rc 0 "$RC"
+  expect_contains "$OUT" "$(printf '%-36s %s' keyboard_brightness_timeout 'unavailable (read failed)')"
+
+  export FAKE_ADB_MODE=push-fail
+  run_kbled install --serial FAKESERIAL --force
+  expect_rc 1 "$RC"
+  expect_contains "$OUT" "failed to push kbled_watch.sh"
+
+  export FAKE_ADB_MODE=ok
+}
+
+case_doctor() {
+  seed_device
+  run_kbled doctor --serial FAKESERIAL
+  expect_rc 0 "$RC"
+  expect_contains "$OUT" "found agui_common system service"
+  expect_contains "$OUT" "Titan_2 (Android 16)"
+  expect_contains "$OUT" "keyboard_brightness_timeout = 5000"
+}
+
+case_serial_selection() {
+  seed_device
+
+  # --serial wins over the environment, and a bad serial is refused before
+  # anything is written.
+  run_kbled_env ENVSERIAL status
+  expect_rc 0 "$RC"
+  expect_contains "$OUT" "device: ENVSERIAL"
+
+  run_kbled_env 'bad serial' status
+  expect_rc 2 "$RC"
+
+  run_kbled status --serial 'x;id'
+  expect_rc 2 "$RC"
+  expect_eq "$(count_matches "$FAKE_ADB_LOG" 'x;id')" "0"
+}
+
+# --- runner -----------------------------------------------------------------
+
+it() { # case_function
+  local name=$1 dir rc
+  dir="$TMP_ROOT/$name"
+  mkdir -p "$dir"
+  printf '  %-38s ' "$name"
+
+  # Deliberately not wrapped in `if (...)`: a subshell whose status is tested
+  # runs with `set -e` suspended, which would let failing assertions pass.
+  (
+    set -e
+    cd "$ROOT"
+    CASE_DIR="$dir"
+    FAKE_ADB_STATE="$dir/state"
+    FAKE_ADB_LOG="$dir/adb.log"
+    XDG_CONFIG_HOME="$dir/config"
+    export CASE_DIR FAKE_ADB_STATE FAKE_ADB_LOG XDG_CONFIG_HOME
+    : >"$FAKE_ADB_LOG"
+    "$name"
+  ) >"$dir/case.out" 2>&1
+  rc=$?
+
+  if [ "$rc" -eq 0 ]; then
+    pass=$((pass + 1))
+    printf 'PASS\n'
+  else
+    fail=$((fail + 1))
+    printf 'FAIL (exit %s)\n' "$rc"
+    sed 's/^/      /' "$dir/case.out" >&2
+  fi
+}
+
+# A case that always fails, used below to prove the runner reports failures.
+case_harness_self_check() { return 1; }
+
+printf 'kbled tests (%s)\n\n' "$ROOT"
+
+# Self-check before anything else: a failing case has to be reported as a
+# failure, otherwise a green run would prove nothing.
+it case_harness_self_check >/dev/null 2>&1
+if [ "$fail" -ne 1 ]; then
+  printf 'FATAL: the test runner did not report a failing case\n' >&2
+  exit 1
+fi
+pass=0
+fail=0
+
+for c in \
+  case_help \
+  case_usage_errors_exit_2 \
+  case_value_validation \
+  case_install_end_to_end \
+  case_backup_reused_and_forced \
+  case_failed_backup_save_keeps_previous \
+  case_backup_injection_rejected \
+  case_backup_round_trip \
+  case_legacy_and_missing_backup \
+  case_parcel_decoder \
+  case_device_is_off_parser \
+  case_watcher_status_and_stop \
+  case_error_reporting \
+  case_doctor \
+  case_serial_selection; do
+  it "$c"
+done
+
+printf '\n%s passed, %s failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ]

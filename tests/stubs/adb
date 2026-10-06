@@ -1,0 +1,156 @@
+#!/usr/bin/env bash
+# Fake adb for the titan2-keylight test suite. It never contacts a device:
+# every answer comes from files under $FAKE_ADB_STATE.
+#
+# State files:
+#   key_<name>              a stored vendor key value (raw string)
+#   led                     the raw LED value reported by the service
+#   dev/<name>              a file that exists on the fake device
+#   watcher_live            present while the pidfile pid is a live watcher
+#   verify_fail             present once a write happened (mode=verify-fail)
+#
+# Modes ($FAKE_ADB_MODE):
+#   ok           normal behaviour
+#   write-fail   every vendor-key write fails with an adb error
+#   read-fail    every vendor-key read fails with an adb error
+#   verify-fail  reads report a wrong value after the first write (the write
+#                did not stick)
+#   push-fail    kb_adb push fails
+set -uo pipefail
+
+LOG=${FAKE_ADB_LOG:-/dev/null}
+STATE=${FAKE_ADB_STATE:?FAKE_ADB_STATE must be set by the test runner}
+MODE=${FAKE_ADB_MODE:-ok}
+REMOTE=/data/local/tmp
+
+mkdir -p "$STATE/dev"
+printf '%s\n' "$*" >>"$LOG"
+
+if [ "${1:-}" = "-s" ]; then
+  shift 2
+fi
+
+# Render a string the way `service call` renders a UTF-16LE parcel.
+parcel() {
+  awk -v s="$1" 'BEGIN {
+    chars = ""
+    for (c = 32; c < 127; c++) chars = chars sprintf("%c", c)
+    n = length(s)
+    printf "Result: Parcel(  00000000 %08x", n
+    for (i = 1; i <= n; i += 2) {
+      lo = index(chars, substr(s, i, 1)) + 31
+      hi = (i + 1 <= n) ? index(chars, substr(s, i + 1, 1)) + 31 : 0
+      printf " %04x%04x", hi, lo
+    }
+    printf "  \047....\047)\n"
+  }'
+}
+
+case "${1:-}" in
+  get-state)
+    ;;
+  devices)
+    printf 'List of devices attached\nFAKESERIAL\tdevice\n'
+    ;;
+  push)
+    if [ "$MODE" = push-fail ]; then
+      exit 1
+    fi
+    ;;
+  shell)
+    shift
+    cmd=$*
+    case "$cmd" in
+      "service list") printf 'Currently running services:\n  agui_common\n' ;;
+      "getprop ro.product.model") printf 'Titan_2\n' ;;
+      "getprop ro.build.version.release") printf '16\n' ;;
+      "service call agui_common 2 s16 "*)
+        parcel "$(cat "$STATE/led" 2>/dev/null || printf '120')"
+        ;;
+      "service call agui_common 3 s16 "*)
+        rest=${cmd#service call agui_common 3 s16 }
+        key=${rest%% *}
+        if [ "$MODE" = read-fail ]; then
+          printf 'fake-adb: error: device offline\n' >&2
+          exit 1
+        fi
+        if [ "$MODE" = verify-fail ] && [ -f "$STATE/verify_fail" ]; then
+          # The write did not stick: report a different value than was written.
+          parcel 999
+        else
+          parcel "$(cat "$STATE/key_$key" 2>/dev/null || printf '')"
+        fi
+        ;;
+      "service call agui_common 4 s16 "*)
+        rest=${cmd#service call agui_common 4 s16 }
+        key=${rest%% *}
+        val=${rest##* }
+        if [ "$MODE" = write-fail ]; then
+          printf 'fake-adb: error: closed\n' >&2
+          exit 1
+        fi
+        printf '%s\n' "$val" >"$STATE/key_$key"
+        if [ "$MODE" = verify-fail ]; then
+          : >"$STATE/verify_fail"
+        fi
+        ;;
+      "cat $REMOTE/kbled_watch.pid 2>/dev/null")
+        if [ -f "$STATE/dev/kbled_watch.pid" ]; then
+          cat "$STATE/dev/kbled_watch.pid"
+        else
+          exit 1
+        fi
+        ;;
+      "[ -x $REMOTE/kbled_stop.sh ]")
+        if [ -x "$STATE/dev/kbled_stop.sh" ]; then
+          exit 0
+        fi
+        exit 1
+        ;;
+      "$REMOTE/kbled_start.sh")
+        printf '4242\n' >"$STATE/dev/kbled_watch.pid"
+        : >"$STATE/watcher_live"
+        printf 'kbled watcher started (pid 4242)\n'
+        ;;
+      "$REMOTE/kbled_stop.sh")
+        pid=$(cat "$STATE/dev/kbled_watch.pid" 2>/dev/null || printf '')
+        rm -f "$STATE/dev/kbled_watch.pid" "$STATE/watcher_live"
+        if [ -n "$pid" ]; then
+          printf 'kbled watcher stopped (pid %s)\n' "$pid"
+        else
+          printf 'kbled watcher not running\n'
+        fi
+        ;;
+      "kill -0 "*)
+        pid=${cmd#kill -0 }
+        pid=${pid%% *}
+        if [ ! -f "$STATE/watcher_live" ]; then
+          exit 1
+        fi
+        if [ "$pid" != "$(cat "$STATE/dev/kbled_watch.pid" 2>/dev/null)" ]; then
+          exit 1
+        fi
+        ;;
+      "kill "*)
+        pid=${cmd#kill }
+        pid=${pid%% *}
+        if [ "$pid" != "$(cat "$STATE/dev/kbled_watch.pid" 2>/dev/null)" ]; then
+          exit 1
+        fi
+        rm -f "$STATE/dev/kbled_watch.pid" "$STATE/watcher_live"
+        ;;
+      "rm -f "*)
+        for path in $cmd; do
+          case "$path" in
+            "$REMOTE"/*) rm -f "$STATE/dev/${path##*/}" ;;
+          esac
+        done
+        ;;
+      "chmod "*) ;;
+      *) ;;
+    esac
+    ;;
+  *) ;;
+esac
+
+exit 0
