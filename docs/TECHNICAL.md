@@ -53,8 +53,8 @@ uses. Its AIDL surface (transaction codes observed from the stub) is:
 | Code | Method | Arguments |
 |---|---|---|
 | 1 | `writeFile` | path, data |
-| 2 | `readStringFromFile` | path → text |
-| 3 | `getStringFromFile` | key, default → value |
+| 2 | `readStringFromFile` | path -> text |
+| 3 | `getStringFromFile` | key, default -> value |
 | 4 | `putStringToFile` | key, value |
 
 From a shell:
@@ -88,8 +88,8 @@ Result: Parcel(  00000000 00000003 00300031 00000030  '........1.0.0...')
 ```
 
 - length `3`
-- word `00300031` → low16 `0x0031` = `'1'`, high16 `0x0030` = `'0'`
-- word `00000030` → low16 `0x0030` = `'0'`
+- word `00300031` -> low16 `0x0031` = `'1'`, high16 `0x0030` = `'0'`
+- word `00000030` -> low16 `0x0030` = `'0'`
 - result: `"100"`
 
 `lib/common.sh` decodes this with POSIX `awk` only.
@@ -98,8 +98,8 @@ Result: Parcel(  00000000 00000003 00300031 00000030  '........1.0.0...')
 
 `KeyboardLEDTile.handleClick` toggles `keyboard_brightness_timeout`:
 
-- currently on → writes `"0"`
-- currently off → writes the `keyboard_brightness_timeout_backup` value
+- currently on -> writes `"0"`
+- currently off -> writes the `keyboard_brightness_timeout_backup` value
 
 When the value becomes `"0"` the controller's `FileObserver` updates its cached
 timeout but **does not** power the LED off at that moment (the "on sync" is only
@@ -138,11 +138,11 @@ uses a huge timeout plus an explicit off broadcast.
 `service list` shows the Agui binder services, none of which implement a shell
 command (`cmd ...` says "No shell command implementation"):
 
-- `agui_common` — `com.agui.ext.common.IACommonService` (file/key helpers)
-- `agui_functional_service` — `com.agui.server.functional.IAguiFunctional`
+- `agui_common` - `com.agui.ext.common.IACommonService` (file/key helpers)
+- `agui_functional_service` - `com.agui.server.functional.IAguiFunctional`
   (`keyboardLightTest(String)` at transaction code 7 writes a raw value to the
   LED node; used during reverse engineering)
-- `agui_daemon` — `IADaemonService`
+- `agui_daemon` - `IADaemonService`
 
 ## 6. Reboot behaviour
 
