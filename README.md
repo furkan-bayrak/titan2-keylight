@@ -134,7 +134,7 @@ To make this automatic without root, install [Termux:Boot](https://f-droid.org/p
 
 or `./kbled uninstall`. This stops the watcher, restores the values saved at install time and deletes the helper scripts from the phone.
 
-If no backup file is found (for example, if you installed from another computer), the timeout is reset to `30000` ms instead.
+If no backup file is found (for example, if you installed from another computer), the timeout is reset to `30000` ms, the tool's own fallback value. That is not necessarily what your phone shipped with (the vendor default is `5000` ms), so keep the backup file if you can.
 
 To delete the backup file from your computer as well:
 

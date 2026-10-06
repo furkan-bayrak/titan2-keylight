@@ -137,7 +137,8 @@ do_uninstall() {
     [ -n "${KBLED_BRIGHTNESS:-}" ] && kb_write_key keyboard_led_brightness "$KBLED_BRIGHTNESS"
     kb_ok "restored original settings from $bf"
   else
-    kb_warn "no backup found; resetting timeout to $KBLED_DEFAULT_TIMEOUT"
+    kb_warn "no backup found; resetting the timeout to the tool's own default of $KBLED_DEFAULT_TIMEOUT ms"
+    kb_warn "this is not a guaranteed restore of the stock value (the vendor default is 5000 ms)"
     kb_write_key keyboard_brightness_timeout "$KBLED_DEFAULT_TIMEOUT"
     kb_write_key keyboard_brightness_timeout_backup "$KBLED_DEFAULT_TIMEOUT"
   fi

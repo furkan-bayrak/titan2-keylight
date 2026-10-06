@@ -103,7 +103,7 @@ Result: Parcel(  00000000 00000003 00300031 00000030  '........1.0.0...')
 
 When the value becomes `"0"` the controller's `FileObserver` updates its cached
 timeout but **does not** power the LED off at that moment (the "on sync" is only
-posted for non-zero values). With the stock 30 s timeout this is barely
+posted for non-zero values). With the vendor's 5 s default this is barely
 noticeable, but with the always-on timeout the light would stay lit until the
 next screen off/on.
 
