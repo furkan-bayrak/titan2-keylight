@@ -101,8 +101,9 @@ kb_decode_parcel() {
 }
 
 # Vendor keys this tool may touch. Anything else is refused before it can
-# reach an adb shell command line.
-KBLED_KNOWN_KEYS="keyboard_brightness_timeout keyboard_brightness_timeout_backup keyboard_led_brightness"
+# reach an adb shell command line. keyboard_led_auto_switch is read (and only
+# read) by `kbled status`.
+KBLED_KNOWN_KEYS="keyboard_brightness_timeout keyboard_brightness_timeout_backup keyboard_led_brightness keyboard_led_auto_switch"
 
 # True when $1 is one of the vendor keys above.
 kb_is_known_key() {
