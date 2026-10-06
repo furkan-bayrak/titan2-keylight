@@ -28,7 +28,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   a v1.0.0 file written while both reads failed) is no longer reported as a
   restore; the tool warns that there is nothing to restore.
 - The backup is written atomically with mode 0600 inside a 0700 directory, and a
-  failed read or write leaves the previous backup untouched.
+  failed read or write leaves the previous backup untouched. Saving refuses a
+  backup path that exists but is not a regular file, instead of nesting the
+  temporary file inside it.
 - `kbled stop` stops the watcher through its pidfile when the on-device stop
   script is missing or fails, instead of leaving it running silently.
 - A stale or recycled pid is no longer mistaken for a running watcher, and the

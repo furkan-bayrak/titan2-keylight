@@ -264,6 +264,31 @@ case_backup_reused_and_forced() {
   expect_contains "$(cat "$bf")" "KBLED_TIMEOUT=6000"
 }
 
+case_backup_path_not_a_file() {
+  seed_device
+  local bf
+  bf=$(backup_path FAKESERIAL)
+
+  # A directory at the backup path would make mv nest the temporary file
+  # inside it instead of replacing it. Refuse and leave the directory alone.
+  mkdir -p "$bf"
+  : >"$bf/keep"
+
+  run_kbled install --serial FAKESERIAL
+  expect_rc 1 "$RC"
+  expect_contains "$OUT" "is not a regular file"
+  [ -d "$bf" ] || {
+    printf 'the backup directory is gone\n'
+    return 1
+  }
+  [ -f "$bf/keep" ] || {
+    printf 'the backup directory was modified\n'
+    return 1
+  }
+  expect_eq "$(find "$(dirname "$bf")" -name '.kbled-backup.*' -print 2>/dev/null)" ""
+  expect_eq "$(count_matches "$FAKE_ADB_LOG" 'agui_common 4')" "0"
+}
+
 case_failed_backup_save_keeps_previous() {
   seed_device
   local bf before
@@ -685,6 +710,7 @@ for c in \
   case_value_validation \
   case_install_end_to_end \
   case_backup_reused_and_forced \
+  case_backup_path_not_a_file \
   case_failed_backup_save_keeps_previous \
   case_backup_injection_rejected \
   case_backup_value_validation \

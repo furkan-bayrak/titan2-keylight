@@ -323,6 +323,13 @@ kb_backup_file() {
 kb_save_backup() {
   local bf=$1 dir tmp timeout backup brightness
 
+  # A directory (or a FIFO, a device node...) standing where the backup belongs
+  # would make mv nest the temporary file inside it instead of replacing it.
+  # Refuse before reading anything or creating a temporary file.
+  if [ -e "$bf" ] && [ ! -f "$bf" ]; then
+    kb_die "refusing to save a backup at $bf: the path exists and is not a regular file"
+  fi
+
   # Read everything first: never replace a good backup with a half-read one.
   timeout=$(kb_read_key keyboard_brightness_timeout) \
     || kb_die "cannot save a backup: failed to read keyboard_brightness_timeout"
