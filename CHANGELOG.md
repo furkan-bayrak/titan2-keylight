@@ -61,10 +61,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - `--timeout-ms`, `--brightness` and `--serial` are validated before anything is
   sent to the device, and numeric values are normalised.
 - `kbled status` reads `keyboard_led_auto_switch` again instead of failing on it.
-- Restored backup values are validated against the same timeout/brightness
-  ranges as the command line and their leading zeros are normalised, so a
-  hand-edited or imported backup can no longer push an out-of-range value into
-  the device or fail the read-back check.
+- Restored backup values are validated and their leading zeros are normalised,
+  so a hand-edited or imported backup can no longer push an out-of-range value
+  into the device or fail the read-back check. `0` stays valid for every
+  recorded key: it is the vendor's documented "disabled" timeout state (and a
+  dark LED), so a device the stock tile switched off installs normally and a
+  backup holding `0` is still a restore point.
 
 ## [1.0.0] - 2026-10-06
 

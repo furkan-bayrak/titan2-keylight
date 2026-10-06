@@ -384,11 +384,12 @@ case_backup_value_validation() {
   local bf bad
   bf=$(backup_path FAKESERIAL)
 
-  # A backup that records a value the command line would refuse is refused
-  # here too, before anything reaches the device.
+  # A backup that records a value out of range is refused before anything
+  # reaches the device. 0 is in range - it is the vendor's "disabled" state -
+  # and is covered by case_zero_timeout_is_valid.
   for bad in \
     "KBLED_TIMEOUT=9999999999" \
-    "KBLED_TIMEOUT=0" \
+    "KBLED_TIMEOUT=-1" \
     "KBLED_BACKUP=2147483648" \
     "KBLED_BRIGHTNESS=101"; do
     write_backup "$bf" <<EOF
@@ -419,6 +420,37 @@ EOF
   expect_eq "$(device_value keyboard_brightness_timeout)" "7"
   expect_eq "$(device_value keyboard_brightness_timeout_backup)" "5000"
   expect_eq "$(device_value keyboard_led_brightness)" "0"
+}
+
+case_zero_timeout_is_valid() {
+  seed_device
+  local bf
+  bf=$(backup_path FAKESERIAL)
+
+  # 0 is the vendor's documented "disabled" state, not a broken reading: a
+  # device whose light the stock tile switched off must install normally, and
+  # the backup must record the 0 as the value to restore.
+  printf '0\n' >"$FAKE_ADB_STATE/key_keyboard_brightness_timeout"
+  run_kbled install --serial FAKESERIAL --no-watcher
+  expect_rc 0 "$RC"
+  expect_contains "$OUT" "saved current settings to"
+  expect_contains "$(cat "$bf")" "KBLED_TIMEOUT=0"
+
+  # The same 0 is a valid restore point, so a backup holding it (a legacy or
+  # hand-written one included) is applied instead of making uninstall refuse.
+  seed_device
+  write_backup "$bf" <<'EOF'
+KBLED_DEVICE=FAKESERIAL
+KBLED_TIMEOUT=0
+KBLED_BACKUP=0
+KBLED_BRIGHTNESS=30
+EOF
+  run_kbled uninstall --serial FAKESERIAL
+  expect_rc 0 "$RC"
+  expect_contains "$OUT" "restored original settings from"
+  expect_eq "$(device_value keyboard_brightness_timeout)" "0"
+  expect_eq "$(device_value keyboard_brightness_timeout_backup)" "0"
+  expect_eq "$(device_value keyboard_led_brightness)" "30"
 }
 
 case_backup_round_trip() {
@@ -914,6 +946,7 @@ for c in \
   case_failed_backup_save_keeps_previous \
   case_backup_injection_rejected \
   case_backup_value_validation \
+  case_zero_timeout_is_valid \
   case_backup_round_trip \
   case_legacy_and_missing_backup \
   case_parcel_decoder \

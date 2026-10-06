@@ -435,18 +435,15 @@ kb_backup_load() {
           *[!0-9]*) kb_err "backup: $key must be a number (got '$val') in $file"; return 1 ;;
         esac
         if [ -n "$val" ]; then
-          # The same ranges the command line enforces: a hand-edited or
-          # imported backup must not be able to push a value the CLI would
-          # have refused into the device.
+          # A hand-edited or imported backup must not be able to push a value
+          # the tool would never write into the device. 0 is legitimate for
+          # every recorded key - a dark LED, and the vendor's documented
+          # "disabled" timeout state (docs/TECHNICAL.md, device/kbled_watch.sh
+          # is_off) - so only the upper bound differs per key.
+          min=0
           case "$key" in
-            KBLED_BRIGHTNESS)
-              min=0
-              max=100
-              ;;
-            *)
-              min=1
-              max=$KBLED_BIG_TIMEOUT
-              ;;
+            KBLED_BRIGHTNESS) max=100 ;;
+            *) max=$KBLED_BIG_TIMEOUT ;;
           esac
           if ! kb_int_in_range "$val" "$min" "$max"; then
             kb_err "backup: $key must be between $min and $max (got '$val') in $file"
