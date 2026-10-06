@@ -1,0 +1,206 @@
+#!/usr/bin/env bash
+# kbled - always-on keyboard backlight for the Unihertz Titan 2 / Titan 2 Elite
+# (Agui keyboard stack), controllable from the stock Quick Settings tile.
+set -euo pipefail
+
+KBLED_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=lib/common.sh
+. "$KBLED_ROOT/lib/common.sh"
+
+ACTION=""
+TIMEOUT_MS="$KBLED_BIG_TIMEOUT"
+BRIGHTNESS=""
+START_WATCHER=1
+FORCE=0
+
+usage() {
+  cat <<'EOF'
+kbled - always-on keyboard backlight for the Titan 2 / Titan 2 Elite
+
+Usage: kbled [options] [command]
+
+Commands:
+  install      apply the mod and start the watcher (default)
+  uninstall    restore the original settings and remove the watcher
+  status       show current settings and watcher state
+  start        start the background watcher only
+  stop         stop the background watcher only
+  doctor       check that the device is supported
+  version      print the version
+
+Options:
+  -s, --serial SERIAL    adb serial to target (or set KBLED_SERIAL)
+      --timeout-ms MS     timeout to write [default: 2147483647]
+      --brightness N      LED brightness 0-100 (default: leave unchanged)
+      --no-watcher        do not start the background watcher
+  -f, --force             overwrite an existing backup when installing
+  -h, --help              show this help
+
+Examples:
+  ./kbled install
+  ./kbled install --timeout-ms 3600000 --brightness 60
+  ./kbled status
+  ./kbled uninstall
+EOF
+}
+
+parse_args() {
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -s | --serial) KBLED_SERIAL=${2:?missing value for --serial}; shift 2 ;;
+      --serial=*) KBLED_SERIAL=${1#*=}; shift ;;
+      --timeout-ms) TIMEOUT_MS=${2:?missing value for --timeout-ms}; shift 2 ;;
+      --timeout-ms=*) TIMEOUT_MS=${1#*=}; shift ;;
+      --brightness) BRIGHTNESS=${2:?missing value for --brightness}; shift 2 ;;
+      --brightness=*) BRIGHTNESS=${1#*=}; shift ;;
+      --no-watcher) START_WATCHER=0; shift ;;
+      -f | --force) FORCE=1; shift ;;
+      -h | --help) usage; exit 0 ;;
+      -*) kb_die "unknown option: $1 (try --help)" ;;
+      *) ACTION=$1; shift ;;
+    esac
+  done
+
+  case "$ACTION" in
+    "" | install | apply | on) ACTION=install ;;
+    uninstall | restore | revert | off) ACTION=uninstall ;;
+    status | start | stop | doctor | version) : ;;
+    *) kb_die "unknown command: $ACTION (try --help)" ;;
+  esac
+
+  case "$TIMEOUT_MS" in
+    '' | *[!0-9]*) kb_die "--timeout-ms must be a positive integer" ;;
+  esac
+  if [ -n "$BRIGHTNESS" ]; then
+    case "$BRIGHTNESS" in '' | *[!0-9]*) kb_die "--brightness must be 0-100" ;; esac
+    [ "$BRIGHTNESS" -le 100 ] || kb_die "--brightness must be 0-100"
+  fi
+}
+
+do_install() {
+  kb_require_tools
+  kb_find_device
+  kb_doctor
+
+  local bf
+  bf=$(kb_backup_file)
+  if [ -f "$bf" ] && [ "$FORCE" -ne 1 ]; then
+    kb_warn "a backup already exists at $bf"
+    kb_warn "keeping it as the restore point (use --force to overwrite it)"
+  else
+    kb_save_backup "$bf"
+    kb_ok "saved current settings to $bf"
+  fi
+
+  kb_write_key keyboard_brightness_timeout "$TIMEOUT_MS"
+  kb_ok "keyboard_brightness_timeout = $TIMEOUT_MS"
+  kb_write_key keyboard_brightness_timeout_backup "$TIMEOUT_MS"
+  kb_ok "keyboard_brightness_timeout_backup = $TIMEOUT_MS"
+
+  if [ -n "$BRIGHTNESS" ]; then
+    kb_write_key keyboard_led_brightness "$BRIGHTNESS"
+    kb_ok "keyboard_led_brightness = $BRIGHTNESS"
+  fi
+
+  kb_push_scripts "$KBLED_ROOT"
+
+  if [ "$START_WATCHER" -eq 1 ]; then
+    kb_shell "$KBLED_REMOTE_DIR/kbled_start.sh"
+  else
+    kb_warn "watcher not started (--no-watcher); the tile's OFF will apply on the next screen cycle"
+  fi
+
+  cat <<EOF
+
+Done. Use the stock "keyboard_led" Quick Settings tile:
+
+  tile ON   -> backlight stays on while the screen is on
+  tile OFF  -> backlight switches off immediately
+EOF
+}
+
+do_uninstall() {
+  kb_require_tools
+  kb_find_device
+
+  if kb_shell "[ -x $KBLED_REMOTE_DIR/kbled_stop.sh ]" >/dev/null 2>&1; then
+    kb_shell "$KBLED_REMOTE_DIR/kbled_stop.sh" || true
+  fi
+
+  local bf
+  bf=$(kb_backup_file)
+  if [ -f "$bf" ]; then
+    # shellcheck disable=SC1090
+    . "$bf"
+    kb_write_key keyboard_brightness_timeout "${KBLED_TIMEOUT:-$KBLED_DEFAULT_TIMEOUT}"
+    kb_write_key keyboard_brightness_timeout_backup "${KBLED_BACKUP:-$KBLED_DEFAULT_TIMEOUT}"
+    [ -n "${KBLED_BRIGHTNESS:-}" ] && kb_write_key keyboard_led_brightness "$KBLED_BRIGHTNESS"
+    kb_ok "restored original settings from $bf"
+  else
+    kb_warn "no backup found; resetting timeout to $KBLED_DEFAULT_TIMEOUT"
+    kb_write_key keyboard_brightness_timeout "$KBLED_DEFAULT_TIMEOUT"
+    kb_write_key keyboard_brightness_timeout_backup "$KBLED_DEFAULT_TIMEOUT"
+  fi
+
+  kb_shell "rm -f $KBLED_REMOTE_DIR/kbled_watch.sh $KBLED_REMOTE_DIR/kbled_start.sh $KBLED_REMOTE_DIR/kbled_stop.sh $KBLED_REMOTE_DIR/kbled_watch.pid"
+  kb_ok "removed device scripts"
+}
+
+do_status() {
+  kb_require_tools
+  kb_find_device
+
+  printf '%-36s %s\n' "keyboard_brightness_timeout" "$(kb_read_key keyboard_brightness_timeout)"
+  printf '%-36s %s\n' "keyboard_brightness_timeout_backup" "$(kb_read_key keyboard_brightness_timeout_backup)"
+  printf '%-36s %s\n' "keyboard_led_brightness" "$(kb_read_key keyboard_led_brightness)"
+  printf '%-36s %s\n' "keyboard_led_auto_switch" "$(kb_read_key keyboard_led_auto_switch)"
+
+  local pid led
+  pid=$(kb_watcher_pid)
+  if [ -n "$pid" ]; then
+    printf '%-36s %s\n' "watcher" "running (pid $pid)"
+  else
+    printf '%-36s %s\n' "watcher" "not running"
+  fi
+  led=$(kb_read_led)
+  printf '%-36s %s\n' "led" "${led:-?}"
+}
+
+do_start() {
+  kb_require_tools
+  kb_find_device
+  kb_push_scripts "$KBLED_ROOT"
+  kb_shell "$KBLED_REMOTE_DIR/kbled_start.sh"
+}
+
+do_stop() {
+  kb_require_tools
+  kb_find_device
+  kb_shell "$KBLED_REMOTE_DIR/kbled_stop.sh"
+}
+
+do_doctor() {
+  kb_require_tools
+  kb_find_device
+  kb_doctor
+  kb_ok "device looks supported"
+}
+
+do_version() {
+  printf 'kbled %s\n' "$KBLED_VERSION"
+}
+
+parse_args "$@"
+
+# KBLED_SERIAL is consumed by the kb_* helpers in lib/common.sh.
+: "${KBLED_SERIAL:-}"
+
+case "$ACTION" in
+  install) do_install ;;
+  uninstall) do_uninstall ;;
+  status) do_status ;;
+  start) do_start ;;
+  stop) do_stop ;;
+  doctor) do_doctor ;;
+  version) do_version ;;
+esac

@@ -1,0 +1,11 @@
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.swp
+
+# kbled backups (contain per-device settings)
+*.env
+!backup-*.example.env
+
+# Local test scratch
+/tmp/
