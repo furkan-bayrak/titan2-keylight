@@ -18,6 +18,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - CI: `ludeeus/action-shellcheck` is pinned to a release commit instead of a
   moving tag, the workflow has read-only repository access, and the test suite
   runs on every push and pull request.
+- Tests: the fake `adb` fails with a clear message on an unhandled command
+  instead of exiting successfully, so call-site drift cannot pass silently.
 - `.gitignore`: removed an exception rule that matched nothing.
 - `docs/TECHNICAL.md` is ASCII-only, like the rest of the repository.
 

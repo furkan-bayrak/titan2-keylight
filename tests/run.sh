@@ -152,6 +152,26 @@ write_backup() { # path, lines on stdin
 
 # --- cases ------------------------------------------------------------------
 
+case_stub_fails_loudly() {
+  # The fake adb must never answer an unhandled command with success: a test
+  # would then pass for the wrong reason.
+  RC=0
+  OUT=$(adb shell "totally new command" 2>&1) || RC=$?
+  [ "$RC" -ne 0 ] || {
+    printf 'the stub accepted an unknown shell command\n'
+    return 1
+  }
+  expect_contains "$OUT" "unhandled shell command"
+
+  RC=0
+  OUT=$(adb totally-new-subcommand 2>&1) || RC=$?
+  [ "$RC" -ne 0 ] || {
+    printf 'the stub accepted an unknown subcommand\n'
+    return 1
+  }
+  expect_contains "$OUT" "unhandled command"
+}
+
 case_help() {
   run_kbled --help
   expect_rc 0 "$RC"
@@ -805,6 +825,7 @@ pass=0
 fail=0
 
 for c in \
+  case_stub_fails_loudly \
   case_help \
   case_usage_errors_exit_2 \
   case_value_validation \

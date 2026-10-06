@@ -186,10 +186,16 @@ case "${1:-}" in
         done
         ;;
       "chmod "*) ;;
-      *) ;;
+      *)
+        printf 'fake-adb: unhandled shell command: %s\n' "$cmd" >&2
+        exit 2
+        ;;
     esac
     ;;
-  *) ;;
+  *)
+    printf 'fake-adb: unhandled command: %s\n' "$*" >&2
+    exit 2
+    ;;
 esac
 
 exit 0
