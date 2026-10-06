@@ -80,6 +80,28 @@ run_kbled() {
   OUT=$(printf '%s' "$raw" | strip_ansi)
 }
 
+# Run ./kbled with nothing stripped: sanitising is what is under test.
+run_kbled_raw() {
+  local raw
+  RC=0
+  raw=$("$KBLED" "$@" 2>&1) || RC=$?
+  OUT=$raw
+}
+
+# Fail when device output reached the terminal with an ESC byte in it. The
+# tool's own colour codes are stripped first, so only unconsumed escapes (the
+# injected ones) count.
+assert_no_esc() { # text
+  local text
+  text=$(printf '%s' "$1" | strip_ansi)
+  case "$text" in
+    *"$(printf '\033')"*)
+      printf 'an ESC byte from the device reached the terminal\n'
+      return 1
+      ;;
+  esac
+}
+
 # Run the device-side parser or another snippet from lib/common.sh in a plain
 # shell: run_sh <script>
 run_sh() { # script
@@ -489,6 +511,41 @@ case_watcher_status_and_stop() {
   expect_eq "$(count_matches "$FAKE_ADB_LOG" '4242; touch')" "0"
 }
 
+case_device_output_sanitised() {
+  seed_device
+  export FAKE_ADB_MODE=control-chars
+
+  # status prints decoded device values; one of them carries an ESC byte.
+  run_kbled_raw status --serial FAKESERIAL
+  expect_rc 0 "$RC"
+  assert_no_esc "$OUT"
+  expect_contains "$OUT" "keyboard_brightness_timeout"
+  expect_contains "$OUT" "AB"
+
+  # doctor quotes the device value that failed the numeric check.
+  run_kbled_raw doctor --serial FAKESERIAL
+  expect_rc 1 "$RC"
+  assert_no_esc "$OUT"
+  expect_contains "$OUT" "is not a number"
+
+  # The model and release lines printed by doctor are device strings too.
+  export FAKE_ADB_MODE=getprop-chars
+  run_kbled_raw doctor --serial FAKESERIAL
+  expect_rc 0 "$RC"
+  assert_no_esc "$OUT"
+  expect_contains "$OUT" "Titan_2 (Android 16)"
+
+  # A failed read and a failed write echo the adb output in their message.
+  export FAKE_ADB_MODE=read-fail
+  run_kbled_raw status --serial FAKESERIAL
+  assert_no_esc "$OUT"
+
+  export FAKE_ADB_MODE=write-fail
+  run_kbled_raw install --serial FAKESERIAL --force
+  expect_rc 1 "$RC"
+  assert_no_esc "$OUT"
+}
+
 case_error_reporting() {
   seed_device
 
@@ -603,6 +660,7 @@ for c in \
   case_parcel_decoder \
   case_device_is_off_parser \
   case_watcher_status_and_stop \
+  case_device_output_sanitised \
   case_error_reporting \
   case_doctor \
   case_serial_selection; do

@@ -10,12 +10,15 @@
 #   verify_fail             present once a write happened (mode=verify-fail)
 #
 # Modes ($FAKE_ADB_MODE):
-#   ok           normal behaviour
-#   write-fail   every vendor-key write fails with an adb error
-#   read-fail    every vendor-key read fails with an adb error
-#   verify-fail  reads report a wrong value after the first write (the write
-#                did not stick)
-#   push-fail    kb_adb push fails
+#   ok              normal behaviour
+#   write-fail      every vendor-key write fails with an adb error
+#   read-fail       every vendor-key read fails with an adb error
+#   verify-fail     reads report a wrong value after the first write (the write
+#                   did not stick)
+#   push-fail       kb_adb push fails
+#   control-chars   key and LED reads answer with a value that contains an ESC
+#                   byte, the way a hostile phone could
+#   getprop-chars   getprop answers contain an ESC byte
 set -uo pipefail
 
 LOG=${FAKE_ADB_LOG:-/dev/null}
@@ -46,6 +49,12 @@ parcel() {
   }'
 }
 
+# A parcel whose decoded value is "A<ESC>B": the escape byte is what the
+# display paths under test have to strip.
+parcel_with_esc() {
+  printf 'Result: Parcel(  00000000 00000003 001b0041 00000042  \047....\047)\n'
+}
+
 case "${1:-}" in
   get-state)
     ;;
@@ -62,21 +71,39 @@ case "${1:-}" in
     cmd=$*
     case "$cmd" in
       "service list") printf 'Currently running services:\n  agui_common\n' ;;
-      "getprop ro.product.model") printf 'Titan_2\n' ;;
-      "getprop ro.build.version.release") printf '16\n' ;;
+      "getprop ro.product.model")
+        if [ "$MODE" = getprop-chars ]; then
+          printf 'Titan\033_2\n'
+        else
+          printf 'Titan_2\n'
+        fi
+        ;;
+      "getprop ro.build.version.release")
+        if [ "$MODE" = getprop-chars ]; then
+          printf '1\0336\n'
+        else
+          printf '16\n'
+        fi
+        ;;
       "service call agui_common 2 s16 "*)
-        parcel "$(cat "$STATE/led" 2>/dev/null || printf '120')"
+        if [ "$MODE" = control-chars ]; then
+          parcel_with_esc
+        else
+          parcel "$(cat "$STATE/led" 2>/dev/null || printf '120')"
+        fi
         ;;
       "service call agui_common 3 s16 "*)
         rest=${cmd#service call agui_common 3 s16 }
         key=${rest%% *}
         if [ "$MODE" = read-fail ]; then
-          printf 'fake-adb: error: device offline\n' >&2
+          printf 'fake-adb: error: \033device offline\n' >&2
           exit 1
         fi
         if [ "$MODE" = verify-fail ] && [ -f "$STATE/verify_fail" ]; then
           # The write did not stick: report a different value than was written.
           parcel 999
+        elif [ "$MODE" = control-chars ]; then
+          parcel_with_esc
         else
           parcel "$(cat "$STATE/key_$key" 2>/dev/null || printf '')"
         fi
@@ -86,7 +113,7 @@ case "${1:-}" in
         key=${rest%% *}
         val=${rest##* }
         if [ "$MODE" = write-fail ]; then
-          printf 'fake-adb: error: closed\n' >&2
+          printf 'fake-adb: error: \033closed\n' >&2
           exit 1
         fi
         printf '%s\n' "$val" >"$STATE/key_$key"

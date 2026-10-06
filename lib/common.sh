@@ -24,6 +24,22 @@ kb_usage_die() {
 
 kb_have() { command -v "$1" >/dev/null 2>&1; }
 
+# Strip control bytes (NUL-BS, VT, FF, SO-US, DEL) from device-controlled text
+# before it is printed: escape sequences from a hostile or broken phone must
+# not reach the operator's terminal. Only ever applied to strings that are
+# displayed; values that are parsed or compared are never passed through this.
+kb_strip_controls() {
+  printf '%s' "$1" | tr -d '\000-\010\013\014\016-\037\177'
+}
+
+# One line of device-controlled text for an error message: control bytes
+# stripped, newlines collapsed, length capped.
+kb_error_text() {
+  local text
+  text=$(kb_strip_controls "$1")
+  printf '%s' "$text" | tr '\n' ' ' | cut -c1-160
+}
+
 kb_require_tools() {
   kb_have adb || kb_die "adb not found in PATH (install Android platform-tools)"
   kb_have awk || kb_die "awk not found in PATH"
@@ -131,13 +147,13 @@ kb_read_key() {
   local out value
 
   if ! out=$(kb_shell "service call agui_common 3 s16 $1 s16 -1" 2>&1); then
-    out=$(printf '%s' "$out" | tr '\n' ' ' | cut -c1-160)
+    out=$(kb_error_text "$out")
     kb_err "read failed for $1: the phone did not answer${out:+ ($out)}"
     return 1
   fi
 
   if ! value=$(printf '%s' "$out" | kb_decode_parcel); then
-    out=$(printf '%s' "$out" | tr '\n' ' ' | cut -c1-160)
+    out=$(kb_error_text "$out")
     kb_err "read failed for $1: could not decode the reply from the phone${out:+: $out}"
     return 1
   fi
@@ -162,7 +178,7 @@ kb_write_key() {
   esac
   out=$(kb_shell "service call agui_common 4 s16 $key s16 $val" 2>&1) || rc=$?
   if [ "$rc" -ne 0 ]; then
-    out=$(printf '%s' "$out" | tr '\n' ' ')
+    out=$(kb_error_text "$out")
     kb_die "failed to write $key (adb exit $rc)${out:+: $out}"
   fi
   got=""
@@ -170,7 +186,7 @@ kb_write_key() {
     kb_die "could not read $key back to verify the write; the phone or the agui_common service did not answer"
   fi
   [ "$got" = "$val" ] \
-    || kb_die "write verification failed for $key: got '$got', expected '$val'. Your firmware may be unsupported."
+    || kb_die "write verification failed for $key: got '$(kb_strip_controls "$got")', expected '$val'. Your firmware may be unsupported."
 }
 
 # Pre-flight checks: vendor service present and the key readable/numeric.
@@ -182,15 +198,15 @@ kb_doctor() {
     *) kb_die "agui_common service not found - this is not a supported Agui device" ;;
   esac
 
-  model=$(kb_shell getprop ro.product.model | tr -d '\r')
-  release=$(kb_shell getprop ro.build.version.release | tr -d '\r')
+  model=$(kb_strip_controls "$(kb_shell getprop ro.product.model | tr -d '\r')")
+  release=$(kb_strip_controls "$(kb_shell getprop ro.build.version.release | tr -d '\r')")
   kb_ok "device: ${model:-unknown} (Android ${release:-?})"
 
   if ! t=$(kb_read_key keyboard_brightness_timeout); then
     kb_die "the phone did not answer a read of keyboard_brightness_timeout; check the connection and try again"
   fi
   case "$t" in
-    '' | *[!0-9]*) kb_die "keyboard_brightness_timeout is not a number (got '$t'); this firmware may be unsupported" ;;
+    '' | *[!0-9]*) kb_die "keyboard_brightness_timeout is not a number (got '$(kb_strip_controls "$t")'); this firmware may be unsupported" ;;
     *) kb_ok "keyboard_brightness_timeout = $t" ;;
   esac
 }

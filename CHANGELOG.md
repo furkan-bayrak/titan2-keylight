@@ -34,6 +34,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   ending the run silently.
 - A failed read is reported as a read failure instead of showing an empty value
   or blaming the firmware; `status` prints `unavailable (read failed)`.
+- Device-controlled text (vendor values, `getprop` output and the `adb` output
+  echoed in failure messages) is stripped of control bytes before it is printed,
+  so a hostile phone cannot inject terminal escape sequences.
 - A second command, an unknown option, a missing option value or an option that
   does not apply to the chosen command now exits with code 2.
 - `--timeout-ms`, `--brightness` and `--serial` are validated before anything is
