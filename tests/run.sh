@@ -760,6 +760,18 @@ case_doctor() {
   expect_contains "$OUT" "found agui_common system service"
   expect_contains "$OUT" "Titan_2 (Android 16)"
   expect_contains "$OUT" "keyboard_brightness_timeout = 5000"
+
+  # An adb failure during the pre-flight checks is reported, not swallowed.
+  export FAKE_ADB_MODE=service-list-fail
+  run_kbled doctor --serial FAKESERIAL
+  expect_rc 1 "$RC"
+  expect_contains "$OUT" "could not list the phone's system services"
+  expect_contains "$OUT" "device offline"
+
+  export FAKE_ADB_MODE=getprop-fail
+  run_kbled doctor --serial FAKESERIAL
+  expect_rc 1 "$RC"
+  expect_contains "$OUT" "could not read ro.product.model"
 }
 
 case_serial_selection() {

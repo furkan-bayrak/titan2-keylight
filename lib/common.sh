@@ -192,14 +192,26 @@ kb_write_key() {
 # Pre-flight checks: vendor service present and the key readable/numeric.
 kb_doctor() {
   local services model release t
-  services=$(kb_shell "service list" 2>/dev/null | tr -d '\r')
+
+  # Every adb call is checked: a silent abort on a dropped connection was the
+  # same failure class as a silently failed read.
+  if ! services=$(kb_shell "service list" 2>&1); then
+    kb_die "could not list the phone's system services (adb did not answer)${services:+: $(kb_error_text "$services")}"
+  fi
+  services=$(printf '%s' "$services" | tr -d '\r\n')
   case "$services" in
     *agui_common*) kb_ok "found agui_common system service" ;;
     *) kb_die "agui_common service not found - this is not a supported Agui device" ;;
   esac
 
-  model=$(kb_strip_controls "$(kb_shell getprop ro.product.model | tr -d '\r')")
-  release=$(kb_strip_controls "$(kb_shell getprop ro.build.version.release | tr -d '\r')")
+  if ! model=$(kb_shell getprop ro.product.model 2>&1); then
+    kb_die "could not read ro.product.model from the phone (adb did not answer)${model:+: $(kb_error_text "$model")}"
+  fi
+  if ! release=$(kb_shell getprop ro.build.version.release 2>&1); then
+    kb_die "could not read ro.build.version.release from the phone (adb did not answer)${release:+: $(kb_error_text "$release")}"
+  fi
+  model=$(kb_strip_controls "$model" | tr -d '\r\n')
+  release=$(kb_strip_controls "$release" | tr -d '\r\n')
   kb_ok "device: ${model:-unknown} (Android ${release:-?})"
 
   if ! t=$(kb_read_key keyboard_brightness_timeout); then

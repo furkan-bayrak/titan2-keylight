@@ -43,6 +43,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   pidfile content is validated before it reaches the device shell.
 - A failed vendor-key write is reported with the `adb` exit status instead of
   ending the run silently.
+- `kbled doctor` reports a clear error, including the sanitised `adb` output, and
+  exits non-zero when `adb` cannot list the device services or read a property,
+  instead of aborting silently.
 - A failed read is reported as a read failure instead of showing an empty value
   or blaming the firmware; `status` prints `unavailable (read failed)`.
 - Device-controlled text (vendor values, `getprop` output and the `adb` output
