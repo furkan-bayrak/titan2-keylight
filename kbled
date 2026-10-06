@@ -242,6 +242,12 @@ do_uninstall() {
   else
     if [ -f "$bf" ]; then
       kb_warn "the backup at $bf records no timeout and no backup value; nothing to restore"
+      # The tool only overwrites the brightness when --brightness is given, so
+      # a brightness that was recorded without the two timeout values is not
+      # part of this restore path. Say so rather than ignore it silently.
+      if [ -n "$KBLED_BK_BRIGHTNESS" ]; then
+        kb_warn "it does record KBLED_BRIGHTNESS=$KBLED_BK_BRIGHTNESS, which is not restored"
+      fi
     else
       kb_warn "no backup found; resetting the timeout to the tool's own default of $KBLED_DEFAULT_TIMEOUT ms"
     fi

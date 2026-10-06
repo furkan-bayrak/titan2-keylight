@@ -561,6 +561,21 @@ EOF
   esac
   expect_eq "$(device_value keyboard_brightness_timeout)" "30000"
 
+  # A backup that records only a brightness is still not a restore point, so
+  # the tool says so instead of silently ignoring the value it does record.
+  seed_device
+  write_backup "$bf" <<'EOF'
+KBLED_DEVICE=FAKESERIAL
+KBLED_TIMEOUT=''
+KBLED_BACKUP=''
+KBLED_BRIGHTNESS=42
+EOF
+  run_kbled uninstall --serial FAKESERIAL
+  expect_rc 0 "$RC"
+  expect_contains "$OUT" "nothing to restore"
+  expect_contains "$OUT" "KBLED_BRIGHTNESS=42, which is not restored"
+  expect_eq "$(device_value keyboard_led_brightness)" "50"
+
   # The same for a zero-byte backup file.
   seed_device
   : >"$bf"
