@@ -8,18 +8,15 @@ Keep the keyboard backlight on your Unihertz Titan 2 or Titan 2 Elite on for as 
 
 The Titan 2 turns the keyboard backlight off a few seconds after your last key press, and the phone has no setting to keep it on. This project changes the hidden timeout behind that behaviour, so the backlight stays on the whole time the screen is on. It still goes off when the screen goes off, and comes back on when the screen wakes up.
 
-The `keyboard_led` tile in Quick Settings (the panel you pull down from the top of the screen) keeps working exactly as before:
-
-- tile **on**: backlight on whenever the screen is on,
-- tile **off**: backlight off immediately.
+The `keyboard_led` tile in Quick Settings (the panel you pull down from the top of the screen) keeps working exactly as before: tile **on** means the backlight follows the screen, tile **off** turns it off immediately.
 
 No root, no custom firmware, no extra app installed on the phone. The scripts only use the same hidden vendor service that the phone's own Settings app uses.
 
 ## Requirements
 
 - A Unihertz Titan 2 or Titan 2 Elite, or another phone that exposes the same `agui_common` vendor service. `./kbled doctor` checks this before anything is changed.
-- A computer (macOS, Linux or Windows) with `adb` installed. `adb` is Google's free command-line tool for talking to an Android phone from a computer; it comes in the "Android platform-tools" package.
-- `bash` and `awk` on that computer; no Python is needed. Both are already installed on macOS and Linux; on Windows, use WSL or Git Bash.
+- A computer (macOS, Linux or Windows) with `adb` installed: Google's free command-line tool for talking to an Android phone from a computer, shipped in the "Android platform-tools" package.
+- `bash` and `awk` on that computer; no Python is needed. Both are already installed on macOS and Linux (on Windows, use WSL or Git Bash).
 - A USB cable, or wireless debugging turned on (see step 2 below). No root is needed.
 
 ## Install
@@ -39,11 +36,9 @@ With a USB cable:
 adb devices
 ```
 
-USB debugging must be turned on in Developer options. If Developer options is not in your Settings app yet, Android shows it after you tap the build number in Settings > About phone seven times. The first time you connect, the phone asks whether to trust the computer; tap Allow. Your phone should appear in the list with the word `device` next to it.
+USB debugging must be turned on in Developer options; if Developer options is not in your Settings app yet, Android shows it after you tap the build number in Settings > About phone seven times. The first time you connect, the phone asks whether to trust the computer; tap Allow. Your phone should appear in the list with the word `device` next to it.
 
-Over Wi-Fi, using wireless debugging:
-
-Wireless debugging is an Android feature that lets `adb` talk to the phone over your Wi-Fi network instead of a cable. Turn it on in **Developer options > Wireless debugging** (the phone shows the IP address and ports there), then run these two commands; the pairing step is only needed the first time:
+Over Wi-Fi, with wireless debugging (an Android feature that lets `adb` talk to the phone over your Wi-Fi network instead of a cable). Turn it on in **Developer options > Wireless debugging**, which shows the IP address and ports, then run these two commands; the pairing step is only needed the first time:
 
 ```bash
 adb pair <ip>:<pairing-port>    # the code is shown on the phone
@@ -81,7 +76,7 @@ Extra options for `install`:
 ./kbled install --no-watcher
 ```
 
-The first install saves your phone's original values to a small file on your computer at `~/.config/kbled/backup-<serial>.env`, and `uninstall` restores from it. Later installs keep the first backup as your clean restore point unless you pass `--force` to replace it.
+The first install also saves a backup of your phone's original settings on your computer, so `uninstall` can put them back: see [Backups and restore](#backups-and-restore).
 
 ## Everyday use
 
@@ -91,8 +86,6 @@ Use the phone as usual. The backlight stays on while the screen is on, and the Q
 | --- | --- |
 | on | backlight on whenever the screen is on |
 | off | backlight off immediately |
-
-The instant "off" comes from a small helper script (the "watcher") that runs on the phone and watches for that tap. It does nothing else.
 
 All commands, run from the cloned folder:
 
@@ -126,13 +119,9 @@ There is no supported way to start the watcher automatically without root: `kble
 - **Tile "off" does not switch the light off immediately** - the watcher is not running. Run `./kbled start` and check `./kbled status`.
 - **Multiple devices connected** - pass `--serial <serial>` or set `KBLED_SERIAL`.
 
-## Uninstall
+## Backups and restore
 
-```bash
-./uninstall.sh
-```
-
-or `./kbled uninstall`. This stops the watcher, restores the values saved at install time and deletes the helper scripts from the phone.
+The first install saves your phone's original values to a small file on your computer at `~/.config/kbled/backup-<serial>.env`, and `uninstall` restores from it. Later installs keep the first backup as your clean restore point unless you pass `--force` to replace it.
 
 If no backup file is found (for example, if you installed from another computer), the timeout is reset to `30000` ms, the tool's own fallback value. That is not necessarily what your phone shipped with (the vendor default is `5000` ms), so keep the backup file if you can.
 
@@ -142,6 +131,16 @@ To delete the backup file from your computer as well:
 rm -rf ~/.config/kbled
 ```
 
+## Uninstall
+
+```bash
+./uninstall.sh
+```
+
+or `./kbled uninstall`. This stops the watcher, restores the values saved at install time and deletes the helper scripts from the phone.
+
+What gets restored, and what happens when there is no backup file, is in [Backups and restore](#backups-and-restore).
+
 ## Compatibility
 
 Tested on:
@@ -149,14 +148,17 @@ Tested on:
 | Phone | Android | Result |
 | --- | --- | --- |
 | Unihertz Titan 2 (`Titan_2`) | 16 | works |
+| Unihertz Titan 2 Elite | - | tested - works (author's device) |
 
-The Titan 2 Elite most likely uses the same Agui keyboard stack, but it has not been tested here.
+The Titan 2 Elite runs the same Agui keyboard stack. Other phones that expose the same `agui_common` service have not been tested here.
 
 Before writing anything, `./kbled doctor` checks for the hidden vendor service and the expected setting, and the installer verifies every value it writes. If your firmware is unsupported, the script stops without changing anything.
 
 ## How it works
 
 The keyboard backlight is not a normal Android setting. It lives in a hidden vendor file that only a system service can reach, so `kbled` asks that service (the same one the Settings app uses) to store a very large timeout, and keeps a small watcher running that makes the Quick Settings tile turn the light off instantly. Nothing is patched and no root is used.
+
+The watcher is a small helper script, installed on the phone by `install.sh`, that watches for that tile tap and does nothing else.
 
 The full reverse-engineering notes, including the vendor keys, the binder transaction codes and the watcher design, are in [docs/TECHNICAL.md](docs/TECHNICAL.md).
 
