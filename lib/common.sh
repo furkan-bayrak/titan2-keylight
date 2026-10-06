@@ -184,16 +184,51 @@ kb_backup_file() {
 }
 
 kb_save_backup() {
-  local bf=$1
-  mkdir -p "$(dirname "$bf")"
-  {
-    echo "# kbled backup - generated $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    printf 'KBLED_DEVICE=%q\n' "$KBLED_SERIAL"
-    printf 'KBLED_TIMEOUT=%q\n' "$(kb_read_key keyboard_brightness_timeout)"
-    printf 'KBLED_BACKUP=%q\n' "$(kb_read_key keyboard_brightness_timeout_backup)"
-    printf 'KBLED_BRIGHTNESS=%q\n' "$(kb_read_key keyboard_led_brightness)"
-  } >"$bf"
-  chmod 600 "$bf"
+  local bf=$1 dir tmp timeout backup brightness
+
+  # Read everything first: never replace a good backup with a half-read one.
+  timeout=$(kb_read_key keyboard_brightness_timeout) \
+    || kb_die "cannot save a backup: failed to read keyboard_brightness_timeout"
+  backup=$(kb_read_key keyboard_brightness_timeout_backup) \
+    || kb_die "cannot save a backup: failed to read keyboard_brightness_timeout_backup"
+  brightness=$(kb_read_key keyboard_led_brightness) \
+    || kb_die "cannot save a backup: failed to read keyboard_led_brightness"
+  if [ -z "$timeout" ] || [ -z "$backup" ]; then
+    kb_die "cannot save a backup: the device reported no current values"
+  fi
+
+  dir=$(dirname "$bf")
+  mkdir -p "$dir" 2>/dev/null || true
+  [ -d "$dir" ] || kb_die "cannot create the backup directory: $dir"
+  chmod 700 "$dir" 2>/dev/null || true
+
+  # Private from the start: mktemp creates the file as 0600, in the same
+  # directory so the final mv is atomic and can never leave a truncated
+  # backup behind.
+  tmp=$(mktemp "$dir/.kbled-backup.XXXXXX") || kb_die "cannot create a temporary file in $dir"
+
+  if ! {
+    printf '# kbled backup - generated %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf 'KBLED_DEVICE=%s\n' "$KBLED_SERIAL"
+    printf 'KBLED_TIMEOUT=%s\n' "$timeout"
+    printf 'KBLED_BACKUP=%s\n' "$backup"
+    printf 'KBLED_BRIGHTNESS=%s\n' "$brightness"
+  } >"$tmp"; then
+    rm -f "$tmp"
+    kb_die "failed to write the new backup file in $dir"
+  fi
+  chmod 600 "$tmp"
+
+  # Publish only a file that parses back with the values we just captured.
+  if ! kb_backup_load "$tmp" || [ -z "$KBLED_BK_TIMEOUT" ] || [ -z "$KBLED_BK_BACKUP" ]; then
+    rm -f "$tmp"
+    kb_die "the generated backup is incomplete; any previous backup is untouched"
+  fi
+
+  if ! mv -f "$tmp" "$bf"; then
+    rm -f "$tmp"
+    kb_die "failed to install the new backup at $bf"
+  fi
 }
 
 # Parse a backup file into KBLED_BK_* variables. The file is read as plain
