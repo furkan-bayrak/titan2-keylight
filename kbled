@@ -29,7 +29,8 @@ Commands:
   version      print the version
 
 Options:
-  -s, --serial SERIAL    adb serial to target (or set KBLED_SERIAL)
+  -s, --serial SERIAL    adb serial to target (or set KBLED_SERIAL, which may
+                         be left empty to auto-detect; --serial must not be empty)
   -h, --help             show this help
 
 Options for 'install' only:
@@ -148,6 +149,12 @@ parse_args() {
   fi
   if [ -n "$BRIGHTNESS" ]; then
     kb_int_in_range "$BRIGHTNESS" 0 100 || kb_usage_die "--brightness must be between 0 and 100"
+  fi
+  if [ "$seen_serial" -eq 1 ]; then
+    # An explicitly empty --serial is a mistake, not a request to auto-detect;
+    # only an empty/unset KBLED_SERIAL means auto-detect.
+    [ -n "$KBLED_SERIAL" ] \
+      || kb_usage_die "--serial requires a non-empty value (auto-detect is the default)"
   fi
   if [ -n "${KBLED_SERIAL:-}" ]; then
     kb_valid_serial "$KBLED_SERIAL" \

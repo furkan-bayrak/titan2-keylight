@@ -177,6 +177,8 @@ case_help() {
   expect_rc 0 "$RC"
   expect_contains "$OUT" "Usage: kbled [options] [command]"
   expect_contains "$OUT" "Options for 'install' only:"
+  # An empty --serial is a usage error; the help says so.
+  expect_contains "$OUT" "--serial must not be empty"
 }
 
 case_usage_errors_exit_2() {
@@ -188,6 +190,7 @@ case_usage_errors_exit_2() {
     "uninstall --brightness 5" \
     "doctor --no-watcher" \
     "version --serial FAKESERIAL" \
+    "status --serial=" \
     "--nope" \
     "install --timeout-ms" \
     "install --serial"; do
@@ -770,6 +773,17 @@ case_serial_selection() {
 
   run_kbled_env 'bad serial' status
   expect_rc 2 "$RC"
+
+  # An explicitly empty --serial is a usage error, not a request to detect.
+  run_kbled status --serial ''
+  expect_rc 2 "$RC"
+  expect_contains "$OUT" "--serial requires a non-empty value"
+
+  # An empty or unset KBLED_SERIAL still means auto-detect.
+  seed_device
+  run_kbled_env '' status
+  expect_rc 0 "$RC"
+  expect_contains "$OUT" "device: FAKESERIAL"
 
   run_kbled status --serial 'x;id'
   expect_rc 2 "$RC"

@@ -49,7 +49,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   echoed in failure messages) is stripped of control bytes before it is printed,
   so a hostile phone cannot inject terminal escape sequences.
 - A second command, an unknown option, a missing option value or an option that
-  does not apply to the chosen command now exits with code 2.
+  does not apply to the chosen command now exits with code 2. An explicitly
+  empty `--serial` counts as a mistake and exits 2 as well, while an empty
+  `KBLED_SERIAL` still means auto-detect.
 - `--timeout-ms`, `--brightness` and `--serial` are validated before anything is
   sent to the device, and numeric values are normalised.
 - `kbled status` reads `keyboard_led_auto_switch` again instead of failing on it.
