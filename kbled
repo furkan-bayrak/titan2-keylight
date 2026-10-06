@@ -242,20 +242,28 @@ do_status() {
   kb_require_tools
   kb_find_device
 
-  printf '%-36s %s\n' "keyboard_brightness_timeout" "$(kb_read_key keyboard_brightness_timeout)"
-  printf '%-36s %s\n' "keyboard_brightness_timeout_backup" "$(kb_read_key keyboard_brightness_timeout_backup)"
-  printf '%-36s %s\n' "keyboard_led_brightness" "$(kb_read_key keyboard_led_brightness)"
-  printf '%-36s %s\n' "keyboard_led_auto_switch" "$(kb_read_key keyboard_led_auto_switch)"
+  local key val led pid
+  for key in keyboard_brightness_timeout keyboard_brightness_timeout_backup \
+    keyboard_led_brightness keyboard_led_auto_switch; do
+    if val=$(kb_read_key "$key"); then
+      printf '%-36s %s\n' "$key" "$val"
+    else
+      printf '%-36s %s\n' "$key" "unavailable (read failed)"
+    fi
+  done
 
-  local pid led
   pid=$(kb_watcher_pid)
   if [ -n "$pid" ]; then
     printf '%-36s %s\n' "watcher" "running (pid $pid)"
   else
     printf '%-36s %s\n' "watcher" "not running"
   fi
-  led=$(kb_read_led)
-  printf '%-36s %s\n' "led" "${led:-?}"
+
+  if led=$(kb_read_led); then
+    printf '%-36s %s\n' "led" "${led:-?}"
+  else
+    printf '%-36s %s\n' "led" "unavailable (read failed)"
+  fi
 }
 
 do_start() {

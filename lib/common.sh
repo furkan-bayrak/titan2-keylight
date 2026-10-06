@@ -82,13 +82,13 @@ kb_decode_parcel() {
         if (length(tok[j]) == 8) words[++k] = tok[j]
     }
     END {
-      if (k < 2) exit
+      if (k < 2) exit 1
       len = hex(words[2])
       s = ""
       for (i = 1; i <= len; i++) {
         wi = 3 + int((i - 1) / 2)
         w = words[wi]
-        if (length(w) != 8) break
+        if (length(w) != 8) exit 1
         if (i % 2 == 1) c = hex(substr(w, 5, 4))   # low 16 bits
         else            c = hex(substr(w, 1, 4))   # high 16 bits
         s = s sprintf("%c", c)
@@ -122,16 +122,35 @@ kb_is_known_key() {
   return 1
 }
 
-# Read a vendor key: echo its value (empty on failure).
+# Read a vendor key: echo its value and exit 0, or print nothing and exit
+# non-zero when the phone did not answer with something decodable. A key whose
+# value really is empty still exits 0, so callers can tell "could not read"
+# apart from "read an unexpected value".
 kb_read_key() {
   kb_is_known_key "$1" || kb_die "refusing to read unknown key '$1'"
-  { kb_shell "service call agui_common 3 s16 $1 s16 -1" 2>/dev/null || true; } | kb_decode_parcel
+  local out value
+
+  if ! out=$(kb_shell "service call agui_common 3 s16 $1 s16 -1" 2>&1); then
+    out=$(printf '%s' "$out" | tr '\n' ' ' | cut -c1-160)
+    kb_err "read failed for $1: the phone did not answer${out:+ ($out)}"
+    return 1
+  fi
+
+  if ! value=$(printf '%s' "$out" | kb_decode_parcel); then
+    out=$(printf '%s' "$out" | tr '\n' ' ' | cut -c1-160)
+    kb_err "read failed for $1: could not decode the reply from the phone${out:+: $out}"
+    return 1
+  fi
+
+  printf '%s' "$value"
 }
 
 # Read the raw LED sysfs value (0-255/0-100 depending on firmware).
 kb_read_led() {
-  { kb_shell "service call agui_common 2 s16 /sys/devices/platform/keypad_led/keyled_brightness" 2>/dev/null || true; } \
-    | kb_decode_parcel
+  local out
+  out=$(kb_shell "service call agui_common 2 s16 /sys/devices/platform/keypad_led/keyled_brightness" 2>/dev/null) \
+    || return 1
+  printf '%s' "$out" | kb_decode_parcel
 }
 
 # Write a vendor key and verify the read-back.
@@ -146,7 +165,10 @@ kb_write_key() {
     out=$(printf '%s' "$out" | tr '\n' ' ')
     kb_die "failed to write $key (adb exit $rc)${out:+: $out}"
   fi
-  got=$(kb_read_key "$key")
+  got=""
+  if ! got=$(kb_read_key "$key"); then
+    kb_die "could not read $key back to verify the write; the phone or the agui_common service did not answer"
+  fi
   [ "$got" = "$val" ] \
     || kb_die "write verification failed for $key: got '$got', expected '$val'. Your firmware may be unsupported."
 }
@@ -164,9 +186,11 @@ kb_doctor() {
   release=$(kb_shell getprop ro.build.version.release | tr -d '\r')
   kb_ok "device: ${model:-unknown} (Android ${release:-?})"
 
-  t=$(kb_read_key keyboard_brightness_timeout)
+  if ! t=$(kb_read_key keyboard_brightness_timeout); then
+    kb_die "the phone did not answer a read of keyboard_brightness_timeout; check the connection and try again"
+  fi
   case "$t" in
-    '' | *[!0-9]*) kb_die "could not read keyboard_brightness_timeout (got '$t')" ;;
+    '' | *[!0-9]*) kb_die "keyboard_brightness_timeout is not a number (got '$t'); this firmware may be unsupported" ;;
     *) kb_ok "keyboard_brightness_timeout = $t" ;;
   esac
 }
