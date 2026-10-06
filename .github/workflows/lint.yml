@@ -22,7 +22,7 @@ jobs:
           additional_files: kbled
           ignore_paths: .git
         env:
-          SHELLCHECK_OPTS: -e SC1091
+          SHELLCHECK_OPTS: -x -e SC1091
 
   tests:
     runs-on: ubuntu-latest
