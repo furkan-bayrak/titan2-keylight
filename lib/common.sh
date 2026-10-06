@@ -361,7 +361,7 @@ kb_save_backup() {
 # the callers in ./kbled, which shellcheck cannot see from here.
 # shellcheck disable=SC2034
 kb_backup_load() {
-  local file=$1 line key val
+  local file=$1 line key val min max
   KBLED_BK_DEVICE=""
   KBLED_BK_TIMEOUT=""
   KBLED_BK_BACKUP=""
@@ -399,9 +399,25 @@ kb_backup_load() {
         case "$val" in
           *[!0-9]*) kb_err "backup: $key must be a number (got '$val') in $file"; return 1 ;;
         esac
-        if [ "${#val}" -gt 10 ]; then
-          kb_err "backup: $key is out of range in $file"
-          return 1
+        if [ -n "$val" ]; then
+          # The same ranges the command line enforces: a hand-edited or
+          # imported backup must not be able to push a value the CLI would
+          # have refused into the device.
+          case "$key" in
+            KBLED_BRIGHTNESS)
+              min=0
+              max=100
+              ;;
+            *)
+              min=1
+              max=$KBLED_BIG_TIMEOUT
+              ;;
+          esac
+          if ! kb_int_in_range "$val" "$min" "$max"; then
+            kb_err "backup: $key must be between $min and $max (got '$val') in $file"
+            return 1
+          fi
+          val=$(kb_decimal "$val")
         fi
         case "$key" in
           KBLED_TIMEOUT) KBLED_BK_TIMEOUT=$val ;;

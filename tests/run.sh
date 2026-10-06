@@ -309,6 +309,48 @@ EOF
   expect_eq "$(count_matches "$FAKE_ADB_LOG" 'agui_common 4')" "0"
 }
 
+case_backup_value_validation() {
+  seed_device
+  local bf bad
+  bf=$(backup_path FAKESERIAL)
+
+  # A backup that records a value the command line would refuse is refused
+  # here too, before anything reaches the device.
+  for bad in \
+    "KBLED_TIMEOUT=9999999999" \
+    "KBLED_TIMEOUT=0" \
+    "KBLED_BACKUP=2147483648" \
+    "KBLED_BRIGHTNESS=101"; do
+    write_backup "$bf" <<EOF
+KBLED_DEVICE=FAKESERIAL
+$bad
+KBLED_BRIGHTNESS=50
+EOF
+    run_kbled uninstall --serial FAKESERIAL
+    expect_rc 1 "$RC" || {
+      printf 'backup value [%s] was accepted\n' "$bad"
+      return 1
+    }
+    expect_contains "$OUT" "refusing to restore from an invalid backup file"
+  done
+  expect_eq "$(count_matches "$FAKE_ADB_LOG" 'agui_common 4')" "0"
+
+  # Leading zeros are normalised before the value reaches the device, so the
+  # read-back verification matches.
+  seed_device
+  write_backup "$bf" <<'EOF'
+KBLED_DEVICE=FAKESERIAL
+KBLED_TIMEOUT=007
+KBLED_BACKUP=0005000
+KBLED_BRIGHTNESS=0
+EOF
+  run_kbled uninstall --serial FAKESERIAL
+  expect_rc 0 "$RC"
+  expect_eq "$(device_value keyboard_brightness_timeout)" "7"
+  expect_eq "$(device_value keyboard_brightness_timeout_backup)" "5000"
+  expect_eq "$(device_value keyboard_led_brightness)" "0"
+}
+
 case_backup_round_trip() {
   seed_device
   run_kbled install --serial FAKESERIAL --timeout-ms 6000 --brightness 42
@@ -555,6 +597,7 @@ for c in \
   case_backup_reused_and_forced \
   case_failed_backup_save_keeps_previous \
   case_backup_injection_rejected \
+  case_backup_value_validation \
   case_backup_round_trip \
   case_legacy_and_missing_backup \
   case_parcel_decoder \

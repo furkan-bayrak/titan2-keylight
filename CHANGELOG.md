@@ -39,6 +39,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - `--timeout-ms`, `--brightness` and `--serial` are validated before anything is
   sent to the device, and numeric values are normalised.
 - `kbled status` reads `keyboard_led_auto_switch` again instead of failing on it.
+- Restored backup values are validated against the same timeout/brightness
+  ranges as the command line and their leading zeros are normalised, so a
+  hand-edited or imported backup can no longer push an out-of-range value into
+  the device or fail the read-back check.
 
 ## [1.0.0] - 2026-10-06
 
