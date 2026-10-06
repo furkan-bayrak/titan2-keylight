@@ -126,12 +126,16 @@ kb_read_led() {
 
 # Write a vendor key and verify the read-back.
 kb_write_key() {
-  local key=$1 val=$2 got
+  local key=$1 val=$2 got out rc=0
   kb_is_known_key "$key" || kb_die "refusing to write unknown key '$key'"
   case "$val" in
     '' | *[!0-9]*) kb_die "refusing to write a non-numeric value for $key: '$val'" ;;
   esac
-  kb_shell "service call agui_common 4 s16 $key s16 $val" >/dev/null 2>&1
+  out=$(kb_shell "service call agui_common 4 s16 $key s16 $val" 2>&1) || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    out=$(printf '%s' "$out" | tr '\n' ' ')
+    kb_die "failed to write $key (adb exit $rc)${out:+: $out}"
+  fi
   got=$(kb_read_key "$key")
   [ "$got" = "$val" ] \
     || kb_die "write verification failed for $key: got '$got', expected '$val'. Your firmware may be unsupported."
