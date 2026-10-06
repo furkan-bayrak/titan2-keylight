@@ -30,11 +30,13 @@ Commands:
 
 Options:
   -s, --serial SERIAL    adb serial to target (or set KBLED_SERIAL)
+  -h, --help             show this help
+
+Options for 'install' only:
       --timeout-ms MS     timeout to write [default: 2147483647]
       --brightness N      LED brightness 0-100 (default: leave unchanged)
       --no-watcher        do not start the background watcher
   -f, --force             overwrite an existing backup when installing
-  -h, --help              show this help
 
 Examples:
   ./kbled install
@@ -44,20 +46,77 @@ Examples:
 EOF
 }
 
+# True when option $2 can be used with command $1.
+kb_option_applies() {
+  case "$2" in
+    serial) [ "$1" != version ] ;;
+    timeout | brightness | no-watcher | force) [ "$1" = install ] ;;
+    *) return 1 ;;
+  esac
+}
+
 parse_args() {
+  local seen_serial=0 seen_timeout=0 seen_brightness=0 seen_no_watcher=0 seen_force=0
+  local action_set=0
+
   while [ $# -gt 0 ]; do
     case "$1" in
-      -s | --serial) KBLED_SERIAL=${2:?missing value for --serial}; shift 2 ;;
-      --serial=*) KBLED_SERIAL=${1#*=}; shift ;;
-      --timeout-ms) TIMEOUT_MS=${2:?missing value for --timeout-ms}; shift 2 ;;
-      --timeout-ms=*) TIMEOUT_MS=${1#*=}; shift ;;
-      --brightness) BRIGHTNESS=${2:?missing value for --brightness}; shift 2 ;;
-      --brightness=*) BRIGHTNESS=${1#*=}; shift ;;
-      --no-watcher) START_WATCHER=0; shift ;;
-      -f | --force) FORCE=1; shift ;;
-      -h | --help) usage; exit 0 ;;
-      -*) kb_die "unknown option: $1 (try --help)" ;;
-      *) ACTION=$1; shift ;;
+      -s | --serial)
+        [ $# -ge 2 ] || kb_usage_die "missing value for $1"
+        KBLED_SERIAL=$2
+        seen_serial=1
+        shift 2
+        ;;
+      --serial=*)
+        KBLED_SERIAL=${1#*=}
+        seen_serial=1
+        shift
+        ;;
+      --timeout-ms)
+        [ $# -ge 2 ] || kb_usage_die "missing value for $1"
+        TIMEOUT_MS=$2
+        seen_timeout=1
+        shift 2
+        ;;
+      --timeout-ms=*)
+        TIMEOUT_MS=${1#*=}
+        seen_timeout=1
+        shift
+        ;;
+      --brightness)
+        [ $# -ge 2 ] || kb_usage_die "missing value for $1"
+        BRIGHTNESS=$2
+        seen_brightness=1
+        shift 2
+        ;;
+      --brightness=*)
+        BRIGHTNESS=${1#*=}
+        seen_brightness=1
+        shift
+        ;;
+      --no-watcher)
+        START_WATCHER=0
+        seen_no_watcher=1
+        shift
+        ;;
+      -f | --force)
+        FORCE=1
+        seen_force=1
+        shift
+        ;;
+      -h | --help)
+        usage
+        exit 0
+        ;;
+      -*) kb_usage_die "unknown option: $1" ;;
+      *)
+        if [ "$action_set" -ne 0 ]; then
+          kb_usage_die "unexpected argument: $1 (the command is already '$ACTION')"
+        fi
+        ACTION=$1
+        action_set=1
+        shift
+        ;;
     esac
   done
 
@@ -65,8 +124,24 @@ parse_args() {
     "" | install | apply | on) ACTION=install ;;
     uninstall | restore | revert | off) ACTION=uninstall ;;
     status | start | stop | doctor | version) : ;;
-    *) kb_die "unknown command: $ACTION (try --help)" ;;
+    *) kb_usage_die "unknown command: $ACTION" ;;
   esac
+
+  if [ "$seen_serial" -eq 1 ]; then
+    kb_option_applies "$ACTION" serial || kb_usage_die "--serial is not valid for '$ACTION'"
+  fi
+  if [ "$seen_timeout" -eq 1 ]; then
+    kb_option_applies "$ACTION" timeout || kb_usage_die "--timeout-ms is not valid for '$ACTION'"
+  fi
+  if [ "$seen_brightness" -eq 1 ]; then
+    kb_option_applies "$ACTION" brightness || kb_usage_die "--brightness is not valid for '$ACTION'"
+  fi
+  if [ "$seen_no_watcher" -eq 1 ]; then
+    kb_option_applies "$ACTION" no-watcher || kb_usage_die "--no-watcher is not valid for '$ACTION'"
+  fi
+  if [ "$seen_force" -eq 1 ]; then
+    kb_option_applies "$ACTION" force || kb_usage_die "--force is not valid for '$ACTION' (it only affects install)"
+  fi
 
   case "$TIMEOUT_MS" in
     '' | *[!0-9]*) kb_die "--timeout-ms must be a positive integer" ;;

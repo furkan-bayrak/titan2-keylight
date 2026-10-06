@@ -15,6 +15,13 @@ kb_warn() { printf '\033[1;33mwarn\033[0m %s\n' "$*" >&2; }
 kb_err()  { printf '\033[1;31merr \033[0m %s\n' "$*" >&2; }
 kb_die()  { printf '\033[1;31merr \033[0m %s\n' "$*" >&2; exit 1; }
 
+# Usage errors exit with 2, the conventional code for a bad command line.
+kb_usage_die() {
+  printf '\033[1;31merr \033[0m %s\n' "$*" >&2
+  printf 'Run kbled --help for usage.\n' >&2
+  exit 2
+}
+
 kb_have() { command -v "$1" >/dev/null 2>&1; }
 
 kb_require_tools() {
