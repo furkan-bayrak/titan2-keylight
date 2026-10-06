@@ -212,10 +212,15 @@ do_uninstall() {
   bf=$(kb_backup_file)
   if [ -f "$bf" ]; then
     kb_backup_load "$bf" || kb_die "refusing to restore from an invalid backup file: $bf"
-    have_backup=1
-    tmo=${KBLED_BK_TIMEOUT:-$KBLED_DEFAULT_TIMEOUT}
-    bak=${KBLED_BK_BACKUP:-$KBLED_DEFAULT_TIMEOUT}
-    br=${KBLED_BK_BRIGHTNESS:-}
+    # A backup that records neither of the values this mod overwrites is not a
+    # restore point (a v1.0.0 backup written while both reads failed). Treat it
+    # as missing rather than claim a restore that did not happen.
+    if [ -n "$KBLED_BK_TIMEOUT" ] || [ -n "$KBLED_BK_BACKUP" ]; then
+      have_backup=1
+      tmo=${KBLED_BK_TIMEOUT:-$KBLED_DEFAULT_TIMEOUT}
+      bak=${KBLED_BK_BACKUP:-$KBLED_DEFAULT_TIMEOUT}
+      br=${KBLED_BK_BRIGHTNESS:-}
+    fi
   fi
 
   kb_stop_watcher
@@ -228,7 +233,11 @@ do_uninstall() {
     fi
     kb_ok "restored original settings from $bf"
   else
-    kb_warn "no backup found; resetting the timeout to the tool's own default of $KBLED_DEFAULT_TIMEOUT ms"
+    if [ -f "$bf" ]; then
+      kb_warn "the backup at $bf records no timeout and no backup value; nothing to restore"
+    else
+      kb_warn "no backup found; resetting the timeout to the tool's own default of $KBLED_DEFAULT_TIMEOUT ms"
+    fi
     kb_warn "this is not a guaranteed restore of the stock value (the vendor default is 5000 ms)"
     kb_write_key keyboard_brightness_timeout "$KBLED_DEFAULT_TIMEOUT"
     kb_write_key keyboard_brightness_timeout_backup "$KBLED_DEFAULT_TIMEOUT"

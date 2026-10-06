@@ -24,6 +24,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   on a stock, unrooted Titan 2.
 - A backup file is parsed as data instead of being sourced, so a tampered
   backup can no longer run commands or inject arguments into an `adb` call.
+- A backup that records neither a timeout nor a backup value (an empty file, or
+  a v1.0.0 file written while both reads failed) is no longer reported as a
+  restore; the tool warns that there is nothing to restore.
 - The backup is written atomically with mode 0600 inside a 0700 directory, and a
   failed read or write leaves the previous backup untouched.
 - `kbled stop` stops the watcher through its pidfile when the on-device stop

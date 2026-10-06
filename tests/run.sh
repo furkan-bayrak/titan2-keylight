@@ -415,6 +415,39 @@ EOF
   expect_contains "$OUT" "no backup found"
   expect_contains "$OUT" "not a guaranteed restore of the stock value (the vendor default is 5000 ms)"
   expect_eq "$(device_value keyboard_brightness_timeout)" "30000"
+
+  # A backup that records neither value is not a restore point: the tool must
+  # not claim it restored something it did not.
+  seed_device
+  write_backup "$bf" <<'EOF'
+KBLED_DEVICE=FAKESERIAL
+KBLED_TIMEOUT=''
+KBLED_BACKUP=''
+KBLED_BRIGHTNESS=''
+EOF
+  run_kbled uninstall --serial FAKESERIAL
+  expect_rc 0 "$RC"
+  expect_contains "$OUT" "nothing to restore"
+  case "$OUT" in
+    *"restored original settings"*)
+      printf 'an empty backup was reported as a restore\n'
+      return 1
+      ;;
+  esac
+  expect_eq "$(device_value keyboard_brightness_timeout)" "30000"
+
+  # The same for a zero-byte backup file.
+  seed_device
+  : >"$bf"
+  run_kbled uninstall --serial FAKESERIAL
+  expect_rc 0 "$RC"
+  expect_contains "$OUT" "nothing to restore"
+  case "$OUT" in
+    *"restored original settings"*)
+      printf 'an empty backup was reported as a restore\n'
+      return 1
+      ;;
+  esac
 }
 
 case_parcel_decoder() {
