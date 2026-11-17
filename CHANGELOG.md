@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- Contributor instructions for running ShellCheck and the offline test suite,
+  including prerequisites and retained failure diagnostics.
 - A dependency-free test suite (`tests/run.sh`) with a fake `adb`: it covers the
   argument matrix, the install/uninstall round trip, backup-file injection
   attempts, parcel decoding and the on-device watcher parser.
