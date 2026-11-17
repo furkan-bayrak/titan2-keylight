@@ -121,15 +121,21 @@ There is no supported way to start the watcher automatically without root: `kble
 
 ## Backups and restore
 
-The first install saves your phone's original values to a small file on your computer at `~/.config/kbled/backup-<serial>.env`, and `uninstall` restores from it. Later installs keep the first backup as your clean restore point unless you pass `--force` to replace it.
+The first install saves your phone's original values to a small file on your computer, and `uninstall` restores from it. By default the directory is `~/.config/kbled`; if `XDG_CONFIG_HOME` is set to a non-empty value, it is `$XDG_CONFIG_HOME/kbled` instead. Use the same configuration directory when installing and uninstalling so the original backup can be found.
+
+Backup names are `backup-<serial>.env`, with dots and colons in the device serial replaced by underscores. For example, wireless serial `192.168.1.5:5555` uses `backup-192_168_1_5_5555.env`. USB and wireless connections can report different serials for the same phone, so use the original serial/connection when restoring.
+
+Later installs keep the first backup as your clean restore point unless you pass `--force` to replace it.
 
 If no backup file is found (for example, if you installed from another computer), the timeout is reset to `30000` ms, the tool's own fallback value. That is not necessarily what your phone shipped with (the vendor default is `5000` ms), so keep the backup file if you can.
 
-To delete the backup file from your computer as well:
+To find your saved backups:
 
 ```bash
-rm -rf ~/.config/kbled
+ls "${XDG_CONFIG_HOME:-$HOME/.config}/kbled"/backup-*.env
 ```
+
+Keep these files until you have restored the original settings. They are per-device restore points, not disposable application cache; deleting the directory discards every phone's backup.
 
 ## Uninstall
 

@@ -31,6 +31,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - `docs/TECHNICAL.md` is ASCII-only, like the rest of the repository.
 
 ### Fixed
+- Backup documentation now explains `XDG_CONFIG_HOME`, wireless serial filename
+  mapping and preserving per-device restore points.
 - README and `--help` no longer present the tool's 30000 ms fallback as the
   stock timeout; the vendor default is 5000 ms.
 - README no longer recommends Termux:Boot, which cannot keep the watcher alive
