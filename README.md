@@ -164,7 +164,19 @@ The full reverse-engineering notes, including the vendor keys, the binder transa
 
 ## Contributing
 
-Issues and pull requests are welcome. Please run `shellcheck` before submitting; the CI runs it on every push and pull request.
+Issues and pull requests are welcome. From the repository root, run both checks before submitting:
+
+```bash
+shellcheck -x -e SC1091 kbled install.sh uninstall.sh lib/common.sh device/*.sh tests/run.sh tests/stubs/adb
+bash tests/run.sh
+```
+
+Install [ShellCheck](https://www.shellcheck.net/) for the lint check. The test suite
+needs Bash, `awk` and standard Unix command-line tools; it uses a fake `adb` and
+temporary files, so no Android SDK, connected phone or network is needed.
+If a test fails, the suite prints the scratch directory it kept for debugging.
+
+CI runs ShellCheck and the test suite on every push and pull request.
 
 ## License
 
