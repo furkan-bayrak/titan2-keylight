@@ -199,7 +199,7 @@ do_install() {
   if [ "$START_WATCHER" -eq 1 ]; then
     kb_shell "$KBLED_REMOTE_DIR/kbled_start.sh"
   else
-    kb_warn "watcher not started (--no-watcher); the tile's OFF will apply on the next screen cycle"
+    kb_warn "watcher not started (--no-watcher)"
   fi
 
   cat <<EOF
@@ -207,8 +207,12 @@ do_install() {
 Done. Use the stock "keyboard_led" Quick Settings tile:
 
   tile ON   -> backlight stays on while the screen is on
-  tile OFF  -> backlight switches off immediately
 EOF
+  if [ "$START_WATCHER" -eq 1 ]; then
+    printf '  tile OFF  -> backlight switches off immediately\n'
+  else
+    printf '  tile OFF  -> takes effect on the next screen cycle without the watcher\n'
+  fi
 }
 
 do_uninstall() {

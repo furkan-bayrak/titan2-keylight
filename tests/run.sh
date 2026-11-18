@@ -245,6 +245,13 @@ case_value_validation() {
   seed_device
   run_kbled install --serial FAKESERIAL --no-watcher --timeout-ms 0007 --brightness 000
   expect_rc 0 "$RC"
+  expect_contains "$OUT" "tile OFF  -> takes effect on the next screen cycle without the watcher" || return 1
+  case "$OUT" in
+    *"switches off immediately"*)
+      printf 'no-watcher install promised immediate tile OFF\n'
+      return 1
+      ;;
+  esac
   expect_contains "$(adb_log)" "s16 keyboard_brightness_timeout s16 7"
   expect_contains "$(adb_log)" "s16 keyboard_led_brightness s16 0"
 }
@@ -258,6 +265,7 @@ case_install_end_to_end() {
   expect_contains "$OUT" "keyboard_brightness_timeout = 2147483647"
   expect_contains "$OUT" "keyboard_brightness_timeout_backup = 2147483647"
   expect_contains "$OUT" "watcher started"
+  expect_contains "$OUT" "tile OFF  -> backlight switches off immediately" || return 1
   expect_contains "$(adb_log)" "push $ROOT/device/kbled_watch.sh /data/local/tmp/kbled_watch.sh"
 
   expect_eq "$(device_value keyboard_brightness_timeout)" "2147483647"
